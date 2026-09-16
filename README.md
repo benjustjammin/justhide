@@ -165,5 +165,12 @@ implementation here is independent, but the idea is theirs and they deserve the
 credit — if you want a full-featured menu bar manager rather than this, go and use
 Thaw.
 
-Descended in spirit from [Hidden Bar](https://github.com/dwarvesf/hidden), which is
-what I wanted to keep using.
+Descended in spirit from [Hidden Bar](https://github.com/dwarvesf/hidden) (MIT), which
+is what I wanted to keep using.
+
+## Licence
+
+[GPLv3](LICENSE). The code here is written from scratch, so a permissive licence would
+probably have been defensible — but the mechanism that makes it work was learned from
+Ice and Thaw, both GPLv3, and matching them removes any argument about it. If you build
+on this, your users get the same freedoms.
