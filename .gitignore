@@ -1,0 +1,8 @@
+# Build output: the app bundle is assembled by build.sh, not checked in.
+build/
+
+# The iconset is generated from tools/make-icon.swift; the .icns it produces is
+# checked in so a clone can build without running the generator.
+Resources/AppIcon.iconset/
+
+.DS_Store
