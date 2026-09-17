@@ -1,0 +1,109 @@
+name: Release
+
+# Tag a version and this builds, signs, notarises, staples, publishes the
+# release and bumps the Homebrew cask. The secrets it needs are listed in
+# docs/RELEASING.md; without them, do it locally with ./release.sh --publish.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version from the bundle
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+                    Resources/Info.plist)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # A tag that disagrees with the bundle would ship a zip whose name,
+          # release and cask all claim different things.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$VERSION" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match CFBundleShortVersionString $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Import the signing certificate
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+              -P "$P12_PASSWORD" -T /usr/bin/codesign
+          # Without this, codesign blocks on a GUI prompt for keychain access
+          # that no one is there to answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+              -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning
+
+      - name: Build and sign
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning \
+                     | grep 'Developer ID Application' | head -1 \
+                     | sed -n 's/.*"\(.*\)".*/\1/p')
+          echo "Signing as: $IDENTITY"
+          ./build.sh build/JustHide.app
+          codesign --force --options runtime --timestamp \
+                   --sign "$IDENTITY" build/JustHide.app
+          codesign --verify --strict --verbose=2 build/JustHide.app
+          codesign -d --requirements - build/JustHide.app
+
+      - name: Notarise and staple
+        env:
+          KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+          KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "$KEY_P8" | base64 --decode > "$RUNNER_TEMP/key.p8"
+          ditto -c -k --keepParent build/JustHide.app "build/JustHide-$VERSION.zip"
+          xcrun notarytool submit "build/JustHide-$VERSION.zip" \
+              --key "$RUNNER_TEMP/key.p8" --key-id "$KEY_ID" --issuer "$ISSUER_ID" \
+              --wait
+          xcrun stapler staple build/JustHide.app
+          rm "$RUNNER_TEMP/key.p8"
+          # Re-made so that what people download carries the stapled ticket.
+          rm "build/JustHide-$VERSION.zip"
+          ditto -c -k --keepParent build/JustHide.app "build/JustHide-$VERSION.zip"
+          shasum -a 256 "build/JustHide-$VERSION.zip"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" "build/JustHide-$VERSION.zip" \
+              --title "JustHide $VERSION" --generate-notes
+
+      - name: Bump the Homebrew cask
+        if: ${{ secrets.TAP_TOKEN != '' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          SHA=$(shasum -a 256 "build/JustHide-$VERSION.zip" | cut -d' ' -f1)
+          git clone --depth 1 \
+              "https://x-access-token:${{ secrets.TAP_TOKEN }}@github.com/benjustjammin/homebrew-tap.git" \
+              "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+                    -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/justhide.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "justhide $VERSION"
+          git push

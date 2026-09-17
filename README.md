@@ -39,8 +39,16 @@ it is missing, and both disappear once it is granted.
 
 ## Install
 
-There are no notarised releases, so build it. It takes a few seconds and needs only
-Xcode's command line tools.
+```sh
+brew install --cask benjustjammin/tap/justhide
+```
+
+Releases are signed with a Developer ID and notarised, which matters for more than
+Gatekeeper: macOS matches a permission grant against the app's signature, so a
+properly signed build keeps your Accessibility permission across updates instead of
+asking again every time.
+
+Or build it — it takes a few seconds and needs only Xcode's command line tools:
 
 ```sh
 git clone https://github.com/benjustjammin/justhide.git
@@ -50,7 +58,10 @@ cp -R build/JustHide.app /Applications/
 open -a JustHide
 ```
 
-That's it. A chevron appears at the right of your menu bar.
+Either way, a chevron appears in your menu bar. Install it somewhere inside an
+Applications folder: macOS only honours the concealment allowlist for an app running
+from one, so a copy left in `~/Downloads` or a build directory will look like it is
+working and hide nothing.
 
 > **Rebuilding?** `build.sh` ad-hoc signs by default, and an ad-hoc signature changes
 > with every build — which quietly invalidates the Accessibility grant you just gave
@@ -216,6 +227,18 @@ build.sh                      compiles and assembles the bundle
 
 No Xcode project: one target, a handful of files, and a shell script is less to keep
 in sync than a `pbxproj`.
+
+## Releasing
+
+`./release.sh` builds, signs, notarises, staples, zips and checksums a release;
+`--publish` also creates the GitHub release and bumps the cask in
+[benjustjammin/homebrew-tap](https://github.com/benjustjammin/homebrew-tap). Tagging
+`v*` does the same thing on CI. The version comes from `CFBundleShortVersionString`,
+so the tag, the zip and the cask cannot drift apart.
+
+[docs/RELEASING.md](docs/RELEASING.md) covers the one-off setup: creating a Developer
+ID certificate without Xcode, storing notarisation credentials, and which secrets CI
+needs.
 
 ## Credit
 
