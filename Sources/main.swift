@@ -71,6 +71,29 @@ if arguments.contains("--list") {
     exit(0)
 }
 
+// MARK: - --apps
+
+// What the "add an app" list in Settings would offer, and why. Useful when an app
+// that is plainly in the bar does not turn up in that list.
+if arguments.contains("--apps") {
+    // Careful reading this: a process started from a terminal inherits THAT
+    // terminal's Accessibility grant, so this can say true while the app itself
+    // has none. The app's own state is the one in Settings.
+    print("Accessibility trusted: \(AXIsProcessTrusted()) (this process; a terminal's grant is inherited)")
+    print("Hidden: \(Settings.hiddenBundleIDs.sorted().joined(separator: ", "))")
+    let candidates = MenuBarApps.candidates()
+    for (title, group) in [("In your menu bar now", candidates.inBarNow),
+                           ("Seen in your menu bar before", candidates.seenBefore)] {
+        print("\n\(title):")
+        if group.isEmpty { print("  (none)") }
+        for app in group {
+            let icon = MenuBarApps.icon(for: app.bundleID) == nil ? "  (no icon)" : ""
+            print("  \(app.name)  [\(app.bundleID)]\(icon)")
+        }
+    }
+    exit(0)
+}
+
 // MARK: - --trydrag
 
 // Works through the delivery strategies in order and reports which, if any,
@@ -269,7 +292,7 @@ final class AssertTest: NSObject, NSApplicationDelegate {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            AssessmentMode.conceal(bundleIDs: targets) { result in
+            AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: targets)) { result in
                 switch result {
                 case let .success(token):
                     self.token = token
@@ -400,6 +423,16 @@ if arguments.contains("--selftest") {
     let controller = WidthController()
     app.delegate = controller
     app.run()
+} else if let running = NSRunningApplication
+            .runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .first(where: { $0.processIdentifier != getpid() }) {
+    // Opening the app while it is already running -- double-clicking it in
+    // Finder, most likely -- used to add a second chevron to the bar, each with
+    // its own assertion. Open Settings in the copy that is already there instead.
+    DistributedNotificationCenter.default().postNotificationName(
+        .justHideShowSettings, object: nil, userInfo: nil, deliverImmediately: true)
+    print("JustHide is already running (pid \(running.processIdentifier)); asked it to open Settings.")
+    exit(0)
 } else {
     let controller = AssertionController()
     app.delegate = controller

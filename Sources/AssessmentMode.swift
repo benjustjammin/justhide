@@ -63,17 +63,34 @@ enum AssessmentMode {
         }
     }
 
-    /// Conceals every menu bar item belonging to `hiddenBundleIDs`, by allowing
-    /// everything else. Assertions are a union of allowlists, so concealment is
-    /// expressed as "allow all the others".
-    static func conceal(bundleIDs hiddenBundleIDs: Set<String>,
+    /// Everything running except the apps to hide. Concealment is expressed as an
+    /// allowlist, so hiding is "permit all the others".
+    ///
+    /// This is a snapshot: an app that launches afterwards is not on the list and
+    /// its icon is concealed even though nobody asked for it, so whoever holds the
+    /// assertion has to keep it up to date (see AssertionController).
+    static func allowlist(excluding hiddenBundleIDs: Set<String>) -> Set<String> {
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        return running.subtracting(hiddenBundleIDs)
+    }
+
+    /// Activates an assertion permitting exactly `allowed`, concealing the rest.
+    ///
+    /// An allowlist entry is only honoured for an app running from a normal place.
+    /// Measured on 27.0 with one ad-hoc signed test app: run from /private/tmp its
+    /// icon was concealed by every assertion, its identifier on the list or not;
+    /// the same bundle copied to /Applications was left alone as asked. Signing is
+    /// not what decides it -- both copies were ad-hoc -- which is worth knowing,
+    /// because it is the likely source of the claim that assessment mode only
+    /// respects Developer ID-signed apps. It also means a debug build run from a
+    /// build directory cannot keep its own icon; install it first.
+    static func conceal(allowing allowed: Set<String>,
                         completion: @escaping (Result<Token, Error>) -> Void) {
         guard let classes = classes else {
             completion(.failure(Failure.unavailable))
             return
         }
-        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        let allowed = running.subtracting(hiddenBundleIDs).sorted()
+        let allowed = allowed.sorted()
 
         guard let configuration = (classes.configuration.alloc() as AnyObject)
                 .perform(configureSelector, with: systemItems, with: allowed as NSArray)?
@@ -86,7 +103,7 @@ enum AssessmentMode {
             return
         }
 
-        Log.sections.log("activating assertion: concealing \(hiddenBundleIDs.sorted().joined(separator: ",")), allowing \(allowed.count) apps")
+        Log.sections.log("activating assertion: allowing \(allowed.count) apps")
 
         var settled = false
         let handler: @convention(block) (Any?) -> Void = { error in

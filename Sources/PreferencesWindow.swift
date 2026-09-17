@@ -21,6 +21,12 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var autoHidePopUp: NSPopUpButton?
     private var shortcutButton: NSButton?
     private var quirksNote: NSTextField?
+    private var permissionNote: NSTextField?
+    private var permissionButton: NSButton?
+    private var recheckButton: NSButton?
+    private var permissionTop: NSLayoutConstraint?
+    private var permissionHeight: NSLayoutConstraint?
+    private let picker = AppPicker()
 
     private var rows: [(name: String, bundleID: String)] = []
     /// While true the next keystroke is captured as the shortcut.
@@ -39,6 +45,14 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         stopRecording()
     }
 
+    /// Granting Accessibility happens in System Settings, over in another app, so
+    /// the window has no way of hearing about it. Coming back to JustHide is the
+    /// signal: re-read everything then.
+    @objc private func windowBecameActive() {
+        guard window?.isVisible == true else { return }
+        reload()
+    }
+
     // MARK: - Building
 
     private func build() {
@@ -51,6 +65,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         let content = NSView()
         window.contentView = content
+
+        NotificationCenter.default.addObserver(self, selector: #selector(windowBecameActive),
+                                               name: NSApplication.didBecomeActiveNotification,
+                                               object: nil)
 
         // ---- Header: icon, name, version
         let iconView = NSImageView(image: NSApp.applicationIconImage)
@@ -77,13 +95,39 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         scroll.borderType = .bezelBorder
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let listButtons = NSSegmentedControl(labels: ["+", "\u{2212}"], trackingMode: .momentary,
+        let listButtons = NSSegmentedControl(labels: ["+", "\u{2212}", "\u{21BB}"],
+                                             trackingMode: .momentary,
                                              target: self, action: #selector(addOrRemove(_:)))
         listButtons.segmentStyle = .smallSquare
         listButtons.translatesAutoresizingMaskIntoConstraints = false
 
         let perAppNote = label("Hiding applies to a whole app, not to one of its icons.",
                                secondary: true)
+
+        // ---- Accessibility, which only the list above depends on. Collapsed to
+        // nothing once it is granted: a permission the user has already given is
+        // not worth a row of the window.
+        let permissionNote = label(AccessibilityAccess.explanation, secondary: true)
+        permissionNote.textColor = .systemOrange
+        self.permissionNote = permissionNote
+        let permissionButton = NSButton(title: "Allow\u{2026}", target: self,
+                                        action: #selector(requestAccessibility))
+        permissionButton.bezelStyle = .rounded
+        permissionButton.controlSize = .small
+        permissionButton.translatesAutoresizingMaskIntoConstraints = false
+        self.permissionButton = permissionButton
+        // Granting happens in System Settings, and nothing tells us when it has
+        // been done -- so there is an explicit way to ask again, rather than the
+        // user wondering whether the window has noticed.
+        let recheckButton = NSButton(title: "Re-check", target: self, action: #selector(recheck))
+        recheckButton.bezelStyle = .rounded
+        recheckButton.controlSize = .small
+        recheckButton.translatesAutoresizingMaskIntoConstraints = false
+        self.recheckButton = recheckButton
+        let permissionRow = NSStackView(views: [permissionNote, permissionButton, recheckButton])
+        permissionRow.orientation = .horizontal
+        permissionRow.spacing = 8
+        permissionRow.translatesAutoresizingMaskIntoConstraints = false
 
         // ---- Options
         let optionsLabel = label("Behaviour", bold: true)
@@ -155,7 +199,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             quirks.bottomAnchor.constraint(equalTo: quirksBox.bottomAnchor, constant: -10),
         ])
 
-        for view in [iconView, name, subtitle, listLabel, scroll, listButtons, perAppNote, optionsLabel,
+        for view in [iconView, name, subtitle, listLabel, scroll, listButtons, perAppNote,
+                     permissionRow, optionsLabel,
                      loginCheckbox, hoverCheckbox, autoHideLabel, autoHidePopUp,
                      shortcutLabel, shortcutButton, glyphLabel, glyphPopUp,
                      quirksLabel, quirksBox] {
@@ -185,12 +230,16 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
             listButtons.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 6),
             listButtons.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
-            listButtons.widthAnchor.constraint(equalToConstant: 72),
+            listButtons.widthAnchor.constraint(equalToConstant: 108),
 
             perAppNote.centerYAnchor.constraint(equalTo: listButtons.centerYAnchor),
             perAppNote.leadingAnchor.constraint(equalTo: listButtons.trailingAnchor, constant: 10),
 
-            optionsLabel.topAnchor.constraint(equalTo: listButtons.bottomAnchor, constant: 18),
+            permissionRow.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            permissionRow.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor,
+                                                    constant: -margin),
+
+            optionsLabel.topAnchor.constraint(equalTo: permissionRow.bottomAnchor, constant: 18),
             optionsLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
 
             loginCheckbox.topAnchor.constraint(equalTo: optionsLabel.bottomAnchor, constant: 8),
@@ -225,6 +274,14 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             quirksBox.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -margin),
         ])
 
+        let permissionTop = permissionRow.topAnchor.constraint(equalTo: listButtons.bottomAnchor,
+                                                               constant: 12)
+        let permissionHeight = permissionRow.heightAnchor.constraint(equalToConstant: 22)
+        NSLayoutConstraint.activate([permissionTop, permissionHeight])
+        self.permissionTop = permissionTop
+        self.permissionHeight = permissionHeight
+        applyPermissionState()
+
         // Fit the window to the content rather than to a guessed height.
         content.layoutSubtreeIfNeeded()
         let needed = content.fittingSize
@@ -238,6 +295,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         var notes = [
             "• Hiding works per app, not per icon. An app with several icons hides "
             + "all of them together.",
+            "• Position means nothing here: this list decides what is hidden, and a "
+            + "hidden icon is not moved to one side, it is not drawn at all. macOS "
+            + "decides where each icon sits, and remembers it per app, so an icon can "
+            + "sit either side of the JustHide symbol. Hold \u{2318} and drag icons to "
+            + "arrange them; that is remembered too.",
             "• While icons are hidden, clicking the clock will not open Notification "
             + "Center. Swipe from the right edge, or reveal first.",
         ]
@@ -295,62 +357,76 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         // The notes depend on the chosen symbol, so they are rebuilt here.
         quirksNote?.stringValue = Self.quirksText
+        applyPermissionState()
+    }
+
+    private func applyPermissionState() {
+        let granted = AccessibilityAccess.isGranted
+        permissionNote?.stringValue = AccessibilityAccess.explanation
+        permissionNote?.isHidden = granted
+        permissionButton?.isHidden = granted
+        recheckButton?.isHidden = granted
+        // A hidden view still holds its space under Auto Layout, so the row is
+        // collapsed rather than merely hidden.
+        permissionHeight?.constant = granted ? 0 : 22
+        permissionTop?.constant = granted ? 0 : 12
+    }
+
+    /// Re-reads the permission and the app list. Also on the \u{21BB} button by the
+    /// list, for when an app has been opened since the window was.
+    @objc private func recheck() {
+        let granted = AccessibilityAccess.isGranted
+        Log.controller.log("re-checking Accessibility: granted = \(granted)")
+        reload()
+        guard !granted, AccessibilityAccess.hasBeenAsked else { return }
+
+        // A running process is not always told about a grant made after it
+        // started, so "still not allowed" has two quite different meanings and
+        // the only way to tell them apart is to start again.
+        let alert = NSAlert()
+        alert.messageText = "Accessibility still is not allowed"
+        alert.informativeText = "If you have just switched JustHide on under Privacy & Security, "
+            + "it needs to start again to pick that up.\n\nOtherwise, switch JustHide on in "
+            + "System Settings first."
+        alert.addButton(withTitle: "Restart JustHide")
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: AccessibilityAccess.restart()
+        case .alertSecondButtonReturn: AccessibilityAccess.openSystemSettings()
+        default: break
+        }
+    }
+
+    @objc private func requestAccessibility() {
+        // The system shows its dialog at most once per process, so from the
+        // second press on the only thing that can help is the Settings pane.
+        // Do both: whichever is available wins.
+        if !AccessibilityAccess.request() {
+            AccessibilityAccess.openSystemSettings()
+        }
+        reload()
     }
 
     // MARK: - Hidden apps
 
     @objc private func addOrRemove(_ sender: NSSegmentedControl) {
-        sender.selectedSegment == 0 ? showAddMenu(from: sender) : removeSelected()
+        switch sender.selectedSegment {
+        case 0: showAddPicker()
+        case 1: removeSelected()
+        default: recheck()
+        }
     }
 
-    private func showAddMenu(from sender: NSSegmentedControl) {
-        let menu = NSMenu()
-        let hidden = Settings.hiddenBundleIDs
-
-        let header = NSMenuItem(title: "In your menu bar now", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-
-        let candidates = MenuBarApps.current().filter { !hidden.contains($0.bundleID) }
-        if candidates.isEmpty {
-            let none = NSMenuItem(title: "    Nothing else to hide", action: nil, keyEquivalent: "")
-            none.isEnabled = false
-            menu.addItem(none)
+    /// A sheet, not a pop-up menu: macOS 27 does not draw NSMenuItem images, and
+    /// this list is much easier to read with each app's icon beside its name.
+    /// See AppPicker.
+    private func showAddPicker() {
+        guard let window = window else { return }
+        picker.present(over: window, excluding: Settings.hiddenBundleIDs) { [weak self] bundleIDs in
+            Settings.hiddenBundleIDs.formUnion(bundleIDs)
+            self?.reload()
         }
-        for app in candidates {
-            let item = NSMenuItem(title: "    \(app.name)", action: #selector(addFromMenu(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = app.bundleID
-            item.image = MenuBarApps.icon(for: app.bundleID)
-            menu.addItem(item)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-        let other = NSMenuItem(title: "Other App\u{2026}", action: #selector(addFromPanel), keyEquivalent: "")
-        other.target = self
-        menu.addItem(other)
-
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
-    }
-
-    @objc private func addFromMenu(_ sender: NSMenuItem) {
-        guard let bundleID = sender.representedObject as? String else { return }
-        Settings.hiddenBundleIDs.insert(bundleID)
-        reload()
-    }
-
-    @objc private func addFromPanel() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.allowsMultipleSelection = true
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.prompt = "Add"
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier else { continue }
-            Settings.hiddenBundleIDs.insert(bundleID)
-        }
-        reload()
     }
 
     private func removeSelected() {

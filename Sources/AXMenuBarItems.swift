@@ -67,6 +67,23 @@ enum AXMenuBar {
         return CGRect(origin: point, size: size)
     }
 
+    /// Whether one app owns any menu bar item. Asked of that app directly rather
+    /// than through currentItems(), both to keep it cheap and to avoid querying AX
+    /// about our own process, which makes our items vanish from the bar.
+    ///
+    /// A concealed item is still reported here -- measured: an app whose icon was
+    /// concealed the moment it appeared still exposes it under AXExtrasMenuBar,
+    /// with a nonsense frame -- which is what makes this usable for spotting an
+    /// app whose icon macOS is currently hiding.
+    static func hasItems(forPID pid: pid_t) -> Bool {
+        guard pid > 0 else { return false }
+        guard let extrasRef = copy(AXUIElementCreateApplication(pid), "AXExtrasMenuBar"),
+              CFGetTypeID(extrasRef) == AXUIElementGetTypeID(),
+              let children = copy(extrasRef as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement]
+        else { return false }
+        return !children.isEmpty
+    }
+
     /// Every status item every running app exposes, ordered left to right.
     static func currentItems() -> [AXMenuBarItem] {
         var found: [AXMenuBarItem] = []

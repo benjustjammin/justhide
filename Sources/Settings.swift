@@ -115,4 +115,8 @@ enum Settings {
 
 extension Notification.Name {
     static let justHideSettingsChanged = Notification.Name("justHideSettingsChanged")
+
+    /// Sent between processes: a second copy of JustHide asks the one already
+    /// running to open Settings, instead of adding a second chevron to the bar.
+    static let justHideShowSettings = Notification.Name("dev.justhide.app.showSettings")
 }
