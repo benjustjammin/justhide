@@ -80,9 +80,6 @@ Either way, export a `.p12` from Keychain Access (right-click the certificate â†
 Export) once you have the identity: CI needs it, and it is how you move the
 identity to another Mac.
 
-Keep `developer-id.p12` â€” GitHub Actions needs it (below), and it is how you
-move the identity to another Mac.
-
 ## One-off: notarisation credentials
 
 An App Store Connect API key is better than an Apple ID password: it is
