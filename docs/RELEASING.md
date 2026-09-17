@@ -23,8 +23,26 @@ codesign -d --requirements - /Applications/Something.app
 
 ## One-off: a Developer ID Application certificate
 
-Xcode's Settings → Accounts → Manage Certificates is the easy route, but it
-needs Xcode. This is the same thing with the command line tools only.
+**With Xcode installed**, which is the easy route:
+
+Xcode → Settings (⌘,) → **Accounts** → select your Apple ID → **Manage
+Certificates…** → **+** → **Developer ID Application**. It creates the key,
+gets the certificate and puts both in your login keychain in one go. You need
+to be the Account Holder or an Admin on the team, and Apple caps how many of
+these you can have, so don't churn them.
+
+Then check it took:
+
+```sh
+security find-identity -v -p codesigning
+#   1) ABC… "Developer ID Application: Your Name (TEAMID)"
+```
+
+`xcode-select` does not need pointing at Xcode for any of this — `notarytool`,
+`stapler` and `codesign` all work from the Command Line Tools, and `build.sh`
+uses `xcrun swiftc`.
+
+**Without Xcode**, the same thing by hand:
 
 ```sh
 mkdir -p ~/.justhide-signing && cd ~/.justhide-signing
@@ -57,6 +75,10 @@ If the identity is listed but signing complains about the chain, the Apple
 intermediate is missing: fetch **Developer ID – G2** from
 [apple.com/certificateauthority](https://www.apple.com/certificateauthority/)
 and double-click it.
+
+Either way, export a `.p12` from Keychain Access (right-click the certificate →
+Export) once you have the identity: CI needs it, and it is how you move the
+identity to another Mac.
 
 Keep `developer-id.p12` — GitHub Actions needs it (below), and it is how you
 move the identity to another Mac.

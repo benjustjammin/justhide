@@ -40,7 +40,9 @@ it is missing, and both disappear once it is granted.
 ## Install
 
 ```sh
-brew install --cask benjustjammin/tap/justhide
+brew tap benjustjammin/tap
+brew trust benjustjammin/tap      # Homebrew 7 will not load a cask from an untrusted tap
+brew install --cask justhide
 ```
 
 Releases are signed with a Developer ID and notarised, which matters for more than
