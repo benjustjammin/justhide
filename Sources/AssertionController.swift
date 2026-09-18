@@ -100,6 +100,15 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         applyShortcut()
         applyHoverMonitor()
 
+        // Opening or closing the lid, or plugging a display in, moves the menu
+        // bar around, and the bar that appears draws our item from whatever it
+        // last had -- which is how a glyph ends up disagreeing with the state on
+        // the other screen. Nothing else re-applies it, because the glyph only
+        // changes when the state does. (The width mechanism has watched this
+        // notification all along, for its own reasons.)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screensChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
         // Let the bar settle before the first conceal, so every owner has
         // registered its items.
@@ -258,14 +267,30 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func settingsChanged() {
+    @objc private func screensChanged() {
+        Log.controller.log("displays changed; re-applying the glyph")
+        refreshGlyph()
+        // Again once the new arrangement has settled: the notification arrives
+        // while the bars are still being rebuilt, so the first pass can be drawn
+        // over by whatever that bar was already holding.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.refreshGlyph()
+        }
+    }
+
+    /// The chevron as it should look right now, warning included: re-applying
+    /// the normal glyph while hiding is broken would go back to claiming the
+    /// icons are merely showing.
+    private func refreshGlyph() {
         if Mechanism.failure != nil {
-            // Re-applying the normal glyph here would go back to claiming the
-            // icons are merely showing.
             JustHide.applyWarningGlyph(to: chevron)
         } else {
             JustHide.applyGlyph(to: chevron, concealed: isConcealed)
         }
+    }
+
+    @objc private func settingsChanged() {
+        refreshGlyph()
         applyShortcut()
         applyHoverMonitor()
         if hiddenBundleIDs.isEmpty {
