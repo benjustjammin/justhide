@@ -2,6 +2,11 @@
 
 Two one-off setup jobs, then `./release.sh --publish` per version.
 
+Every push and pull request is built by `.github/workflows/build.yml` first: it
+compiles, checks the bundle came out whole, fails on any compiler warning and keeps
+the unsigned app as an artifact for a fortnight. It ignores `v*` tags, which are
+`release.yml`'s job.
+
 None of the secrets below should ever be pasted into a chat, a commit, or an
 issue. The `.p8` key and the `.p12` password are the two that matter.
 

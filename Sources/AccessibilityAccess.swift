@@ -68,22 +68,10 @@ enum AccessibilityAccess {
     ///
     /// A process is told its Accessibility state when it starts, and a grant made
     /// afterwards does not always reach it -- the usual "quit and reopen the app"
-    /// that every Accessibility-using app asks for. The new copy is launched by a
-    /// detached shell after a pause, so that it appears once this one has gone:
-    /// started any sooner it would see this copy still running and simply hand
-    /// over to it (see main.swift).
+    /// that every Accessibility-using app asks for.
     static func restart() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; open \"\(Bundle.main.bundleURL.path)\""]
-        do {
-            try task.run()
-        } catch {
-            Log.controller.error("could not relaunch: \(error.localizedDescription)")
-            return
-        }
         Log.controller.log("restarting to pick up an Accessibility change")
-        NSApp.terminate(nil)
+        Mechanism.relaunch()
     }
 
     /// What Settings should say about it, in one line.

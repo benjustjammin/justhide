@@ -15,6 +15,28 @@ enum Settings {
         static let glyph = "glyph"
         static let autoHideDelay = "autoHideDelay"
         static let didMigrateFromNook = "didMigrateFromNook"
+        static let checksForUpdates = "checkForUpdates"
+        static let latestSeenVersion = "latestSeenVersion"
+    }
+
+    // MARK: - Updates
+
+    /// Whether to ask GitHub, once a day, if there is a newer version. On by
+    /// default and switchable, because it is the only thing in JustHide that
+    /// touches the network at all.
+    static var checksForUpdates: Bool {
+        get { defaults.object(forKey: Key.checksForUpdates) as? Bool ?? true }
+        set {
+            defaults.set(newValue, forKey: Key.checksForUpdates)
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// The newest version the last check saw, so the offer survives a restart
+    /// without asking again.
+    static var latestSeenVersion: String? {
+        get { defaults.string(forKey: Key.latestSeenVersion) }
+        set { defaults.set(newValue, forKey: Key.latestSeenVersion) }
     }
 
     /// The app was called Nook while it was being figured out. Carry the one
@@ -115,6 +137,15 @@ enum Settings {
 
 extension Notification.Name {
     static let justHideSettingsChanged = Notification.Name("justHideSettingsChanged")
+
+    /// Hiding started or stopped working, or JustHide changed mechanism. Kept
+    /// apart from justHideSettingsChanged: nothing the user chose has changed,
+    /// and the controllers must not treat it as a settings edit.
+    static let justHideMechanismChanged = Notification.Name("justHideMechanismChanged")
+
+    /// The update check learned something: it started, finished, or found a
+    /// newer version.
+    static let justHideUpdateChanged = Notification.Name("justHideUpdateChanged")
 
     /// Sent between processes: a second copy of JustHide asks the one already
     /// running to open Settings, instead of adding a second chevron to the bar.

@@ -26,6 +26,14 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var recheckButton: NSButton?
     private var permissionTop: NSLayoutConstraint?
     private var permissionHeight: NSLayoutConstraint?
+    private var mechanismRow: NSStackView?
+    private var mechanismNote: NSTextField?
+    private var mechanismButton: NSButton?
+    private var mechanismTop: NSLayoutConstraint?
+    private var mechanismCollapsed: NSLayoutConstraint?
+    private var updateNote: NSTextField?
+    private var updateButton: NSButton?
+    private var updatesCheckbox: NSButton?
     private let picker = AppPicker()
 
     private var rows: [(name: String, bundleID: String)] = []
@@ -76,6 +84,30 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         let name = label("JustHide", size: 22, bold: true)
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         let subtitle = label("Tidies your menu bar. Version \(version).", secondary: true)
+
+        let updateNote = label("", secondary: true)
+        updateNote.maximumNumberOfLines = 0
+        // Without this a long line widens the WINDOW instead of wrapping: the
+        // row sits beside the header, so nothing else constrains its width.
+        updateNote.preferredMaxLayoutWidth = 240
+        self.updateNote = updateNote
+        let updateButton = NSButton(title: "Check Now", target: self,
+                                    action: #selector(updateAction))
+        updateButton.bezelStyle = .rounded
+        updateButton.controlSize = .small
+        updateButton.translatesAutoresizingMaskIntoConstraints = false
+        self.updateButton = updateButton
+        // A plain button rather than a link: a link in a window nobody expects
+        // to be clickable is a guessing game, and this is the only outward
+        // pointer in the app.
+        let githubButton = NSButton(title: "GitHub", target: self, action: #selector(openProjectPage))
+        githubButton.bezelStyle = .rounded
+        githubButton.controlSize = .small
+        githubButton.translatesAutoresizingMaskIntoConstraints = false
+        let updateRow = NSStackView(views: [updateNote, updateButton, githubButton])
+        updateRow.orientation = .horizontal
+        updateRow.spacing = 8
+        updateRow.translatesAutoresizingMaskIntoConstraints = false
 
         // ---- Hidden apps
         let listLabel = label("Hide these apps' menu bar icons", bold: true)
@@ -129,6 +161,26 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         permissionRow.spacing = 8
         permissionRow.translatesAutoresizingMaskIntoConstraints = false
 
+        // ---- How hiding is going. Collapsed to nothing while it is going
+        // fine, which is nearly always -- but when it is not, this is the only
+        // place that explains it and the only way to the other mechanism.
+        let mechanismNote = label("", secondary: true)
+        mechanismNote.textColor = .systemOrange
+        mechanismNote.maximumNumberOfLines = 0
+        mechanismNote.preferredMaxLayoutWidth = 520 - 40
+        self.mechanismNote = mechanismNote
+        let mechanismButton = NSButton(title: "", target: self, action: #selector(switchMechanism))
+        mechanismButton.bezelStyle = .rounded
+        mechanismButton.controlSize = .small
+        mechanismButton.translatesAutoresizingMaskIntoConstraints = false
+        self.mechanismButton = mechanismButton
+        let mechanismRow = NSStackView(views: [mechanismNote, mechanismButton])
+        mechanismRow.orientation = .vertical
+        mechanismRow.alignment = .leading
+        mechanismRow.spacing = 6
+        mechanismRow.translatesAutoresizingMaskIntoConstraints = false
+        self.mechanismRow = mechanismRow
+
         // ---- Options
         let optionsLabel = label("Behaviour", bold: true)
 
@@ -141,6 +193,12 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                                      target: self, action: #selector(toggleHover))
         hoverCheckbox.translatesAutoresizingMaskIntoConstraints = false
         self.hoverCheckbox = hoverCheckbox
+
+        let updatesCheckbox = NSButton(checkboxWithTitle: "Check GitHub for new versions",
+                                       target: self, action: #selector(toggleUpdateChecks))
+        updatesCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        updatesCheckbox.toolTip = "Once a day, and nothing about you is sent."
+        self.updatesCheckbox = updatesCheckbox
 
         let autoHideLabel = label("Hide again after:")
         let autoHidePopUp = NSPopUpButton()
@@ -199,9 +257,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             quirks.bottomAnchor.constraint(equalTo: quirksBox.bottomAnchor, constant: -10),
         ])
 
-        for view in [iconView, name, subtitle, listLabel, scroll, listButtons, perAppNote,
-                     permissionRow, optionsLabel,
-                     loginCheckbox, hoverCheckbox, autoHideLabel, autoHidePopUp,
+        for view in [iconView, name, subtitle, updateRow, listLabel, scroll, listButtons, perAppNote,
+                     permissionRow, mechanismRow, optionsLabel,
+                     loginCheckbox, hoverCheckbox, updatesCheckbox, autoHideLabel, autoHidePopUp,
                      shortcutLabel, shortcutButton, glyphLabel, glyphPopUp,
                      quirksLabel, quirksBox] {
             content.addSubview(view)
@@ -220,7 +278,17 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             subtitle.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2),
             subtitle.leadingAnchor.constraint(equalTo: name.leadingAnchor),
 
-            listLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 18),
+            updateRow.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 8),
+            updateRow.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            updateRow.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor,
+                                                constant: -margin),
+
+            // Whichever of the icon and the header text runs lower decides where
+            // the list starts, so a two-line update note cannot collide with it.
+            listLabel.topAnchor.constraint(greaterThanOrEqualTo: iconView.bottomAnchor,
+                                           constant: 18),
+            listLabel.topAnchor.constraint(greaterThanOrEqualTo: updateRow.bottomAnchor,
+                                           constant: 14),
             listLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
 
             scroll.topAnchor.constraint(equalTo: listLabel.bottomAnchor, constant: 6),
@@ -239,7 +307,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             permissionRow.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor,
                                                     constant: -margin),
 
-            optionsLabel.topAnchor.constraint(equalTo: permissionRow.bottomAnchor, constant: 18),
+            mechanismRow.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            mechanismRow.trailingAnchor.constraint(equalTo: content.trailingAnchor,
+                                                   constant: -margin),
+
+            optionsLabel.topAnchor.constraint(equalTo: mechanismRow.bottomAnchor, constant: 18),
             optionsLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
 
             loginCheckbox.topAnchor.constraint(equalTo: optionsLabel.bottomAnchor, constant: 8),
@@ -248,7 +320,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             hoverCheckbox.topAnchor.constraint(equalTo: loginCheckbox.bottomAnchor, constant: 6),
             hoverCheckbox.leadingAnchor.constraint(equalTo: loginCheckbox.leadingAnchor),
 
-            autoHideLabel.topAnchor.constraint(equalTo: hoverCheckbox.bottomAnchor, constant: 14),
+            updatesCheckbox.topAnchor.constraint(equalTo: hoverCheckbox.bottomAnchor, constant: 6),
+            updatesCheckbox.leadingAnchor.constraint(equalTo: loginCheckbox.leadingAnchor),
+
+            autoHideLabel.topAnchor.constraint(equalTo: updatesCheckbox.bottomAnchor, constant: 14),
             autoHideLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
             autoHidePopUp.centerYAnchor.constraint(equalTo: autoHideLabel.centerYAnchor),
             autoHidePopUp.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 170),
@@ -280,7 +355,28 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         NSLayoutConstraint.activate([permissionTop, permissionHeight])
         self.permissionTop = permissionTop
         self.permissionHeight = permissionHeight
+
+        // The mechanism row's height is its content, not a constant: the note
+        // wraps to however many lines it needs. Only the collapsed state is a
+        // fixed height, so that constraint is the one switched on and off.
+        let mechanismTop = mechanismRow.topAnchor.constraint(equalTo: permissionRow.bottomAnchor,
+                                                             constant: 12)
+        mechanismTop.isActive = true
+        self.mechanismTop = mechanismTop
+        self.mechanismCollapsed = mechanismRow.heightAnchor.constraint(equalToConstant: 0)
+
+        let snug = listLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 18)
+        snug.priority = .defaultLow
+        snug.isActive = true
+
         applyPermissionState()
+        applyMechanismState()
+        applyUpdateState()
+
+        NotificationCenter.default.addObserver(self, selector: #selector(mechanismChanged),
+                                               name: .justHideMechanismChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateChanged),
+                                               name: .justHideUpdateChanged, object: nil)
 
         // Fit the window to the content rather than to a guessed height.
         content.layoutSubtreeIfNeeded()
@@ -312,9 +408,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             notes.append("• This symbol stays the same whether icons are hidden or "
                          + "shown, which is why it is correct on every display.")
         }
-        notes.append("• Hiding uses a part of macOS 27 that Apple does not document. "
-                     + "If an update ever breaks it, JustHide says so in its log and "
-                     + "the older method is still available by launching with --width.")
+        if Mechanism.current == .concealment {
+            notes.append("• Hiding uses a part of macOS 27 that Apple does not document. If an "
+                         + "update ever takes it away, JustHide says so on its symbol and offers "
+                         + "you its older method, which needs nothing undocumented.")
+        }
         return notes.joined(separator: "\n")
     }
 
@@ -347,6 +445,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             ? "Open JustHide at login (approve it in System Settings)"
             : "Open JustHide at login"
         hoverCheckbox?.state = Settings.hoverToReveal ? .on : .off
+        updatesCheckbox?.state = Settings.checksForUpdates ? .on : .off
 
         glyphPopUp?.selectItem(at: Settings.Glyph.allCases.firstIndex(of: Settings.glyph) ?? 0)
         if let index = Self.autoHideOptions.firstIndex(where: { $0.seconds == Settings.autoHideDelay }) {
@@ -355,9 +454,144 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         if !recordingShortcut {
             shortcutButton?.title = Settings.hotkeyDescription
         }
+        // Hover reveal is part of the concealment controller only; the width
+        // mechanism has no cheap way to do it, so the box says so rather than
+        // offering a switch that does nothing.
+        hoverCheckbox?.isEnabled = Mechanism.current == .concealment
+        hoverCheckbox?.toolTip = Mechanism.current == .concealment
+            ? nil : "Not available while JustHide is using its older method."
+
         // The notes depend on the chosen symbol, so they are rebuilt here.
         quirksNote?.stringValue = Self.quirksText
         applyPermissionState()
+        applyMechanismState()
+        applyUpdateState()
+        // Opening Settings is the moment someone is wondering, so this is where
+        // a check belongs. It is rate-limited to once a day inside.
+        UpdateCheck.checkIfDue()
+    }
+
+    private func applyUpdateState() {
+        switch UpdateCheck.state {
+        case .unknown:
+            updateNote?.stringValue = Settings.checksForUpdates
+                ? "" : "Update checks are off."
+            updateNote?.textColor = .secondaryLabelColor
+            updateButton?.title = "Check Now"
+        case .checking:
+            updateNote?.stringValue = "Checking for a newer version\u{2026}"
+            updateNote?.textColor = .secondaryLabelColor
+            updateButton?.title = "Check Now"
+        case .upToDate:
+            updateNote?.stringValue = "This is the latest version."
+            updateNote?.textColor = .secondaryLabelColor
+            updateButton?.title = "Check Now"
+        case let .available(version, _):
+            updateNote?.stringValue = "Version \(version) is available."
+            updateNote?.textColor = .controlAccentColor
+            // Homebrew installs are updated by brew, which knows to quit the
+            // running copy first. Dragging a new bundle over a cask install
+            // leaves brew reporting it as outdated for ever, so this offers the
+            // command rather than the download.
+            updateButton?.title = UpdateCheck.isHomebrewInstall
+                ? "Copy brew Command" : "Get \(version)\u{2026}"
+            updateButton?.toolTip = UpdateCheck.isHomebrewInstall
+                ? UpdateCheck.homebrewCommand : nil
+        case let .failed(reason):
+            updateNote?.stringValue = reason
+            updateNote?.textColor = .secondaryLabelColor
+            updateButton?.title = "Try Again"
+        }
+        fitWindow()
+    }
+
+    @objc private func updateChanged() {
+        guard window != nil else { return }
+        applyUpdateState()
+    }
+
+    @objc private func updateAction() {
+        if UpdateCheck.availableVersion != nil {
+            if UpdateCheck.isHomebrewInstall {
+                UpdateCheck.copyHomebrewCommand()
+                updateNote?.stringValue = "Copied \u{2014} run it in Terminal."
+                updateNote?.toolTip = UpdateCheck.homebrewCommand
+            } else {
+                UpdateCheck.openReleasePage()
+            }
+            return
+        }
+        UpdateCheck.checkIfDue(force: true)
+    }
+
+    @objc private func openProjectPage() {
+        NSWorkspace.shared.open(UpdateCheck.projectPage)
+    }
+
+    @objc private func toggleUpdateChecks(_ sender: NSButton) {
+        Settings.checksForUpdates = sender.state == .on
+        if sender.state == .on { UpdateCheck.checkIfDue(force: true) }
+        applyUpdateState()
+    }
+
+    /// What Settings has to say about hiding right now: the text, and the button
+    /// that does something about it. nil while there is nothing to report.
+    private func mechanismState() -> (text: String, button: String)? {
+        if Mechanism.current == .width {
+            var text = "JustHide is using its older method: it makes room by widening a hidden "
+                + "divider, which leaves a small gap in the menu bar and slides icons when they "
+                + "hide. Hold \u{2318} and drag the icons you want hidden to the left of the "
+                + "divider."
+            if let advice = Mechanism.advice { text += "\n\n" + advice }
+            return (text, "Use macOS Hiding")
+        }
+        if let failure = Mechanism.failure {
+            return (Mechanism.sentence(failure)
+                    + " JustHide has an older method that works without it, at the cost "
+                    + "of a gap in the menu bar and icons that slide when they hide.",
+                    "Use the Older Method")
+        }
+        return nil
+    }
+
+    private func applyMechanismState() {
+        guard let state = mechanismState() else {
+            mechanismRow?.isHidden = true
+            mechanismNote?.stringValue = ""
+            mechanismCollapsed?.isActive = true
+            mechanismTop?.constant = 0
+            fitWindow()
+            return
+        }
+        mechanismNote?.stringValue = state.text
+        mechanismButton?.title = state.button
+        // Switching back to concealment is pointless on a system that does not
+        // have it: the button would restart the app into the same place.
+        mechanismButton?.isEnabled = Mechanism.current == .width
+            ? AssessmentMode.isAvailable : true
+        mechanismRow?.isHidden = false
+        mechanismCollapsed?.isActive = false
+        mechanismTop?.constant = 12
+        fitWindow()
+    }
+
+    /// Re-fits the window to its content, for a notice that appears or goes away
+    /// while the window is open. Does nothing during build(), which sizes the
+    /// window itself once everything is in place.
+    private func fitWindow() {
+        guard let window = window, let content = window.contentView else { return }
+        content.layoutSubtreeIfNeeded()
+        let needed = content.fittingSize
+        window.setContentSize(NSSize(width: 520, height: max(needed.height + 20, 560)))
+    }
+
+    @objc private func mechanismChanged() {
+        guard window != nil else { return }
+        applyMechanismState()
+    }
+
+    @objc private func switchMechanism() {
+        Mechanism.use(Mechanism.current == .width ? .concealment : .width)
     }
 
     private func applyPermissionState() {

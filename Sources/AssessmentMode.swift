@@ -52,7 +52,17 @@ enum AssessmentMode {
         return (configuration, assertion)
     }()
 
-    static var isAvailable: Bool { classes != nil }
+    static var isAvailable: Bool {
+        !CommandLine.arguments.contains("--simulate-unavailable") && classes != nil
+    }
+
+    /// Both of the failure paths are hard to reach on a working system -- that is
+    /// the point of them -- so they can be asked for:
+    ///   --simulate-unavailable   the framework is missing, as after an update
+    ///   --simulate-failure       the assertion is refused
+    private static var simulatesFailure: Bool {
+        CommandLine.arguments.contains("--simulate-failure")
+    }
 
     /// A live assertion. Holding it keeps the concealment up; dropping it reveals.
     final class Token {
@@ -86,8 +96,12 @@ enum AssessmentMode {
     /// build directory cannot keep its own icon; install it first.
     static func conceal(allowing allowed: Set<String>,
                         completion: @escaping (Result<Token, Error>) -> Void) {
-        guard let classes = classes else {
+        guard isAvailable, let classes = classes else {
             completion(.failure(Failure.unavailable))
+            return
+        }
+        guard !simulatesFailure else {
+            completion(.failure(Failure.rejected("simulated with --simulate-failure")))
             return
         }
         let allowed = allowed.sorted()

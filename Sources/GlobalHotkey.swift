@@ -44,7 +44,7 @@ final class GlobalHotkey {
             return noErr
         }, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &handler)
 
-        var hotKeyID = EventHotKeyID(signature: OSType(Self.identifier), id: Self.identifier)
+        let hotKeyID = EventHotKeyID(signature: OSType(Self.identifier), id: Self.identifier)
         let status = RegisterEventHotKey(UInt32(shortcut.keyCode),
                                          UInt32(shortcut.carbonModifiers),
                                          hotKeyID, GetApplicationEventTarget(), 0, &reference)
@@ -85,6 +85,36 @@ extension Settings {
             if flags.contains(.shift) { carbon |= shiftKey }
             return carbon
         }
+    }
+
+    /// Everything a menu item needs to SHOW this shortcut in its right-hand
+    /// column. Display only: the working registration is the Carbon one above,
+    /// and a menu key equivalent fires only while the menu is open. nil for a
+    /// key with no character a menu can render.
+    static var menuKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
+        guard let shortcut = hotkey else { return nil }
+        let modifiers = NSEvent.ModifierFlags(rawValue: shortcut.modifierFlags)
+        if let key = menuKeys[shortcut.keyCode] { return (key, modifiers) }
+        // Letters, digits and punctuation, read from the current layout so a
+        // non-US keyboard shows what its user actually pressed.
+        guard let name = KeyNames.name(for: shortcut.keyCode), name.count == 1 else { return nil }
+        return (name.lowercased(), modifiers)
+    }
+
+    /// The keys a menu spells with a function-key code or a control character
+    /// rather than the character itself.
+    private static let menuKeys: [Int: String] = [
+        kVK_Space: " ", kVK_Return: "\r", kVK_Tab: "\t", kVK_Escape: "\u{1B}",
+        kVK_Delete: "\u{8}",
+        kVK_LeftArrow: functionKey(NSLeftArrowFunctionKey),
+        kVK_RightArrow: functionKey(NSRightArrowFunctionKey),
+        kVK_UpArrow: functionKey(NSUpArrowFunctionKey),
+        kVK_DownArrow: functionKey(NSDownArrowFunctionKey),
+    ]
+
+    private static func functionKey(_ code: Int) -> String {
+        guard let scalar = UnicodeScalar(UInt16(code)) else { return "" }
+        return String(scalar)
     }
 
     private static let hotkeyKeyCodeKey = "hotkeyKeyCode"

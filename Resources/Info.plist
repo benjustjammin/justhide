@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key>
-	<string>JustHide</string>
 	<key>CFBundleDisplayName</key>
 	<string>JustHide</string>
 	<key>CFBundleExecutable</key>
@@ -14,20 +12,19 @@
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.justhide.app</string>
+	<key>CFBundleName</key>
+	<string>JustHide</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2.1</string>
+	<string>1.3</string>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>6</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>27.0</string>
-	<!-- Menu bar only: no Dock icon, no main window. -->
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>JustHide</string>
-	<!-- Not sandboxed: posting synthetic events to other processes (the cmd-drag
-	     that places spacers) is incompatible with the App Sandbox. -->
 </dict>
 </plist>

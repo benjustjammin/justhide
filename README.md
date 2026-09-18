@@ -110,8 +110,9 @@ macOS 27 works rather than choices:
   will be backwards over there. The fixed symbols avoid it entirely, and Settings
   tells you which family you've picked.
 - **This uses part of macOS that Apple doesn't document.** If an update breaks it,
-  JustHide says so in its log rather than failing quietly, and the older
-  layout-based method is still there: `JustHide --width`.
+  JustHide says so on its menu bar symbol and offers you the older layout-based
+  method there and then — in the dialog, in the symbol's menu, and in Settings.
+  Nothing is buried in the log.
 
 ## How it works
 
@@ -141,11 +142,43 @@ crashing if a future macOS moves things:
                                  -invalidate
 ```
 
-The fallback (`--width`) is the older approach: inflate a divider so items overflow
-behind the system's own chevron, with extra spacer items to cover a wider second
-display. It works without any private API, at the cost of a gap in the bar and icons
-visibly sliding on every toggle. It's kept because a private API can vanish in a
-point release.
+The fallback is the older approach: inflate a divider so items overflow behind the
+system's own chevron, with extra spacer items to cover a wider second display. It
+works without any private API, at the cost of a gap in the bar and icons visibly
+sliding on every toggle. It's kept because a private API can vanish in a point
+release, and it is reached from the app: a refused or missing assertion marks the
+symbol, offers the switch, and explains itself in Settings. `--width` runs it for one
+launch without remembering the choice.
+
+Its items — symbol, spacers, divider — are placed by CREATION ORDER, because
+macOS puts a status item it has never seen before at the far left whatever order it
+was made in. That is also the trap: how many spacers are needed depends on a length
+calibration that isn't known until the first collapse, so a later launch can want a
+spacer whose name has never existed — and that one lands left of the divider,
+where its width does no pushing, silently, with icons leaking. So the count is pinned
+per display arrangement. Needing more is recorded, applied at the next launch under a
+fresh generation of names (which restores creation-order placement, at the cost of one
+⌘-drag), and said out loud in Settings rather than left to the log.
+
+## Updates
+
+Settings says whether this is the latest version, next to a button to the project
+page. Once a day, JustHide asks GitHub for the latest release and compares the tag
+with its own version; if there is a newer one it says so in Settings and in the
+symbol's menu. Nothing is sent -- no identifier, no version, no query string -- and
+the switch in Settings turns it off.
+
+It is not an updater. It offers the download, or for a Homebrew install the one
+command that does the job properly:
+
+```sh
+brew upgrade --cask justhide
+```
+
+That distinction matters more than it looks: the cask quits the running copy before
+replacing the bundle, and a copy that is holding a concealment assertion when its
+bundle is swapped underneath it leaves the menu bar in whatever state it last
+applied.
 
 Diagnostics are deliberately readable, which is more than the mechanism it replaces
 managed:
@@ -155,6 +188,10 @@ log show --last 5m --predicate 'subsystem == "dev.justhide.app"'
 ```
 
 ## Troubleshooting
+
+`--simulate-unavailable` and `--simulate-failure` pretend the concealment facility is
+gone or refuses, which is the only practical way to see what an unlucky macOS update
+would look like.
 
 `JustHide --list` prints your displays, every menu bar item it can see, and whether
 Accessibility is granted. `JustHide --apps` prints what the app picker would offer you

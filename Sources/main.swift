@@ -4,7 +4,9 @@
 //
 //  Modes:
 //    Nook              run normally (menu bar hider)
-//    Nook --width      use the legacy layout-based hiding instead
+//    Nook --width      use the layout-based hiding for this launch only. The
+//                      same choice is in Settings, where it is remembered --
+//                      this argument is for testing it without committing
 //    Nook --list       print every status item found, and exit
 //    Nook --selftest   prove the move primitive works, using only Nook's OWN
 //                      items so nothing of the user's is disturbed, and exit
@@ -151,7 +153,7 @@ final class DragMatrix: NSObject, NSApplicationDelegate {
     }
 
     private func run() {
-        var strategies: [ItemMover.Strategy] = [
+        let strategies: [ItemMover.Strategy] = [
             .init(target: .hidTap, shape: .warpDrag),
             .init(target: .hidTap, shape: .warpDrag, realCommandKey: true),
             .init(target: .sessionTap, shape: .warpDrag),
@@ -416,10 +418,12 @@ if arguments.contains("--selftest") {
     let test = SelfTest()
     app.delegate = test
     app.run()
-} else if arguments.contains("--width") {
-    // Legacy layout-based mechanism: inflates a divider so items overflow. Works
+} else if arguments.contains("--width") || Mechanism.preferred == .width {
+    // The layout-based mechanism: inflates a divider so items overflow. Works
     // without any private API, at the cost of a gap in the bar and icons sliding
-    // on a wider second display.
+    // on a wider second display. Reached either by asking for it in Settings --
+    // which is what happens when concealment fails -- or by --width for a look.
+    Mechanism.current = .width
     let controller = WidthController()
     app.delegate = controller
     app.run()
@@ -434,6 +438,7 @@ if arguments.contains("--selftest") {
     print("JustHide is already running (pid \(running.processIdentifier)); asked it to open Settings.")
     exit(0)
 } else {
+    Mechanism.current = .concealment
     let controller = AssertionController()
     app.delegate = controller
     app.run()

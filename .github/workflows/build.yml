@@ -1,0 +1,66 @@
+name: Build
+
+# Does the thing release.yml assumes: prove it compiles. There are no tests to
+# run, so a build that fails on a pushed commit is the only early warning there
+# is -- and without this it would not turn up until a tag was pushed and the
+# release workflow fell over.
+#
+# Tags are left to release.yml, which builds the same bundle properly signed.
+
+on:
+  push:
+    # A branch filter alone means tag pushes do not match this workflow at all,
+    # which is what we want: release.yml handles those.
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./build.sh build/JustHide.app
+
+      - name: Check the bundle came out whole
+        run: |
+          set -euo pipefail
+          APP=build/JustHide.app
+          test -x "$APP/Contents/MacOS/JustHide"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          # The icon needs BOTH the file and this key, and a missing key is
+          # invisible until someone looks at the Dock.
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist"
+          codesign --verify --strict --verbose=2 "$APP"
+          # The version the release will be tagged and casked as.
+          echo "version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+                           Resources/Info.plist)"
+
+      - name: Fail on compiler warnings
+        run: |
+          set -euo pipefail
+          # Built again, this time reading the diagnostics. The tree compiles
+          # clean, so any warning is a new one: cheaper to keep it that way than
+          # to argue about a baseline later.
+          rm -rf build/warncheck
+          ./build.sh build/warncheck/JustHide.app 2>build/warnings.txt >/dev/null || true
+          if grep 'warning:' build/warnings.txt; then
+            echo "The build is meant to be warning-free." >&2
+            exit 1
+          fi
+          echo "no warnings"
+
+      - name: Package the app
+        # Zipped with ditto, not uploaded as a directory: the upload action
+        # would flatten the bundle's symlinks and lose the executable bit.
+        run: ditto -c -k --sequesterRsrc --keepParent build/JustHide.app build/JustHide.zip
+
+      - name: Keep the build for a look
+        uses: actions/upload-artifact@v4
+        with:
+          name: JustHide-unsigned
+          path: build/JustHide.zip
+          retention-days: 14

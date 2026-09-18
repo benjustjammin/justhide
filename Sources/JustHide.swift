@@ -54,6 +54,57 @@ enum JustHide {
         // cosmetic cue.
     }
 
+    /// A menu item title with a symbol in front of it.
+    ///
+    /// NOT `NSMenuItem.image`, which macOS 27 does not draw -- measured twice
+    /// now, most recently with a probe whose menu had the same symbol set as an
+    /// image (nothing), inside an attributed title (drawn), and in a custom view
+    /// (drawn). The cog macOS puts on a standard "Settings..." item is its own
+    /// doing, not an image we set, and it is what made the other rows look
+    /// unfinished next to it.
+    ///
+    /// Returns nil for a symbol this system does not have, leaving the caller's
+    /// plain title in place rather than an empty row.
+    static func menuTitle(_ text: String, symbol name: String) -> NSAttributedString? {
+        guard let image = menuSymbol(name) else { return nil }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // y nudges the glyph down onto the text baseline, and width is the advance
+        // that sets where the text starts. x does nothing here -- measured with
+        // x: -10, which moved the glyph not at all -- so our column cannot be
+        // slid the point or two left it would take to sit exactly under the cog
+        // macOS draws on "Settings...". Close enough to read as one column.
+        attachment.bounds = NSRect(x: 0, y: -3, width: 17, height: 14)
+        let title = NSMutableAttributedString(attachment: attachment)
+        // No colour attribute on purpose: AppKit inverts the text itself when the
+        // row is highlighted, and a colour set here would survive the inversion.
+        title.append(NSAttributedString(string: " " + text,
+                                        attributes: [.font: NSFont.menuFont(ofSize: 0)]))
+        return title
+    }
+
+    /// The symbol itself, sized for a menu row.
+    static func menuSymbol(_ name: String) -> NSImage? {
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        else { return nil }
+        let configured = symbol.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)) ?? symbol
+        configured.isTemplate = true
+        return configured
+    }
+
+    /// The chevron while hiding is not working. The glyph above would claim the
+    /// icons are showing because they were asked to hide and did not, which is
+    /// indistinguishable from nothing being hidden in the first place -- so the
+    /// item says so instead, and the right-click menu offers the way out.
+    static func applyWarningGlyph(to item: NSStatusItem) {
+        guard let button = item.button else { return }
+        button.title = ""
+        button.image = NSImage(systemSymbolName: "exclamationmark.triangle",
+                               accessibilityDescription: "JustHide cannot hide menu bar icons")
+        button.setAccessibilityLabel("JustHide cannot hide menu bar icons")
+    }
+
     /// Drawn rather than an SF Symbol. On a mirrored second display macOS renders
     /// the symbol FLIPPED -- measured: the same item showing "<" on the built-in
     /// and ">" on the external at the same instant, in the same state -- which

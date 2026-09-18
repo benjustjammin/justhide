@@ -64,10 +64,25 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             self, selector: #selector(showSettings(_:)),
             name: .justHideShowSettings, object: nil)
 
+        // Handy for testing the window without going through the menu. Above the
+        // availability check on purpose: the window is exactly what someone
+        // needs when hiding is NOT working.
+        if CommandLine.arguments.contains("--settings") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                PreferencesWindow.shared.show()
+            }
+        }
+
         guard AssessmentMode.isAvailable else {
-            Log.controller.error("macOS 27 concealment is unavailable; relaunch with --width for the layout-based mechanism")
-            chevron.button?.image = NSImage(systemSymbolName: "exclamationmark.triangle",
-                                            accessibilityDescription: "JustHide cannot hide items on this system")
+            // Not fatal and not silent: the chevron says something is wrong, the
+            // menu and Settings offer the width mechanism instead. Keep the
+            // settings observer so switching from the window still works.
+            Mechanism.report(failure: "This version of macOS does not have the hiding facility "
+                             + "JustHide uses.")
+            JustHide.applyWarningGlyph(to: chevron)
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(settingsChanged),
+                name: .justHideSettingsChanged, object: nil)
             return
         }
         Log.controller.log("launched; hiding \(self.hiddenBundleIDs.sorted().joined(separator: ",") )")
@@ -85,17 +100,16 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         applyShortcut()
         applyHoverMonitor()
 
-        // Handy for testing the window without going through the menu.
-        if CommandLine.arguments.contains("--settings") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                PreferencesWindow.shared.show()
-            }
-        }
 
         // Let the bar settle before the first conceal, so every owner has
         // registered its items.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.conceal()
+        }
+
+        // Well after the work of starting up, and once a day at most.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            UpdateCheck.checkIfDue()
         }
     }
 
@@ -106,10 +120,15 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             showMenu()
             return
         }
-        isConcealed ? reveal() : conceal()
+        isConcealed ? reveal() : conceal(userAsked: true)
     }
 
-    private func conceal() {
+    /// `userAsked` marks the paths where someone is watching -- a click, the
+    /// shortcut, the menu. Those get told when hiding fails; the automatic ones
+    /// (launch, auto-hide, an allowlist refresh) only mark the chevron, because
+    /// a dialog nobody asked for in the middle of something else is worse than
+    /// the chevron carrying the news until they look.
+    private func conceal(userAsked: Bool = false) {
         let hidden = hiddenBundleIDs
         guard !hidden.isEmpty else {
             Log.controller.log("nothing is marked hidden yet; right-click the chevron to choose")
@@ -130,9 +149,18 @@ final class AssertionController: NSObject, NSApplicationDelegate {
                 previous?.invalidate()
                 JustHide.applyGlyph(to: self.chevron, concealed: true)
                 self.autoHideTimer?.invalidate()
+                Mechanism.report(failure: nil)
                 Log.controller.log("concealed \(hidden.count) app(s)")
             case let .failure(error):
-                Log.controller.error("conceal failed: \(error.localizedDescription)")
+                // The completion handler comes back from MenuBarAgent, so it is
+                // not promised to be the main queue, and everything below is UI.
+                DispatchQueue.main.async {
+                    let detail = error.localizedDescription
+                    Log.controller.error("conceal failed: \(detail)")
+                    Mechanism.report(failure: "macOS would not hide the icons: \(detail)")
+                    JustHide.applyWarningGlyph(to: self.chevron)
+                    if userAsked { Mechanism.offerFallback(detail: detail) }
+                }
             }
         }
     }
@@ -140,6 +168,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     private func reveal() {
         token?.invalidate()
         token = nil
+        Mechanism.report(failure: nil)
         JustHide.applyGlyph(to: chevron, concealed: false)
         Log.controller.log("revealed")
         scheduleAutoHide()
@@ -230,7 +259,13 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func settingsChanged() {
-        JustHide.applyGlyph(to: chevron, concealed: isConcealed)
+        if Mechanism.failure != nil {
+            // Re-applying the normal glyph here would go back to claiming the
+            // icons are merely showing.
+            JustHide.applyWarningGlyph(to: chevron)
+        } else {
+            JustHide.applyGlyph(to: chevron, concealed: isConcealed)
+        }
         applyShortcut()
         applyHoverMonitor()
         if hiddenBundleIDs.isEmpty {
@@ -245,7 +280,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     private func applyShortcut() {
         GlobalHotkey.shared.update { [weak self] in
             guard let self = self else { return }
-            self.isConcealed ? self.reveal() : self.conceal()
+            self.isConcealed ? self.reveal() : self.conceal(userAsked: true)
         }
     }
 
@@ -286,26 +321,66 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         guard let button = chevron.button else { return }
         let menu = NSMenu()
 
+        if let version = UpdateCheck.availableVersion {
+            let update = NSMenuItem(title: "Get JustHide \(version)\u{2026}",
+                                    action: #selector(openUpdate), keyEquivalent: "")
+            update.target = self
+            update.attributedTitle = JustHide.menuTitle("Get JustHide \(version)\u{2026}",
+                                                        symbol: "arrow.down.circle")
+            menu.addItem(update)
+            menu.addItem(NSMenuItem.separator())
+        }
+
+        if Mechanism.failure != nil {
+            let switchItem = NSMenuItem(title: "Use the Older Method",
+                                        action: #selector(useWidthMechanism), keyEquivalent: "")
+            switchItem.target = self
+            switchItem.attributedTitle = JustHide.menuTitle("Use the Older Method",
+                                                            symbol: "arrow.2.squarepath")
+            menu.addItem(switchItem)
+            menu.addItem(NSMenuItem.separator())
+        }
+
         let toggle = NSMenuItem(title: isConcealed ? "Show Hidden Icons" : "Hide Icons",
                                 action: #selector(chevronClicked), keyEquivalent: "")
         toggle.target = self
+        toggle.attributedTitle = JustHide.menuTitle(isConcealed ? "Show Hidden Icons" : "Hide Icons",
+                                                    symbol: isConcealed ? "eye" : "eye.slash")
+        // The shortcut is registered with Carbon, not here; this is so the menu
+        // shows what it is, the way every other app's menu does.
+        if let shortcut = Settings.menuKeyEquivalent {
+            toggle.keyEquivalent = shortcut.key
+            toggle.keyEquivalentModifierMask = shortcut.modifiers
+        }
         menu.addItem(toggle)
 
         menu.addItem(NSMenuItem.separator())
         let settings = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings),
                                   keyEquivalent: ",")
         settings.target = self
+        // macOS draws its own cog on this one, so it is left alone -- an
+        // attributed title here would put a second cog inside the row.
         menu.addItem(settings)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit JustHide",
-                                action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let quit = NSMenuItem(title: "Quit JustHide",
+                              action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.attributedTitle = JustHide.menuTitle("Quit JustHide", symbol: "door.left.hand.open")
+        menu.addItem(quit)
 
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 5), in: button)
     }
 
     @objc private func openSettings() {
         PreferencesWindow.shared.show()
+    }
+
+    @objc private func useWidthMechanism() {
+        Mechanism.use(.width)
+    }
+
+    @objc private func openUpdate() {
+        UpdateCheck.openReleasePage()
     }
 
     /// From another copy of JustHide that found this one already running.
