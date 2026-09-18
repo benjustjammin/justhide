@@ -143,6 +143,14 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             Log.controller.log("nothing is marked hidden yet; right-click the chevron to choose")
             return
         }
+        // The glyph goes on BEFORE the assertion does. Measured on 27.0 with a
+        // second display: while an assertion is held, the secondary bar's copy
+        // of our item stops updating -- it keeps whatever it was drawn with, so
+        // a glyph applied after the assertion went up never appears over there,
+        // while a probe holding no assertion updated both bars within 80ms.
+        // Drawing first means the copy freezes on the right thing.
+        JustHide.applyGlyph(to: chevron, concealed: true)
+
         AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: hidden)) { [weak self] result in
             guard let self = self else { return }
             switch result {
