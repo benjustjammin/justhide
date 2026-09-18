@@ -92,13 +92,22 @@ jobs:
               --title "JustHide $VERSION" --generate-notes
 
       - name: Bump the Homebrew cask
-        if: ${{ secrets.TAP_TOKEN != '' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
+          # Checked here rather than in an `if:`, because the secrets context is
+          # not available to one -- which failed the whole workflow file at
+          # parse time, on every push, for as long as it existed.
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "No TAP_TOKEN, so the cask was not bumped. The release is published."
+            exit 0
+          fi
           SHA=$(shasum -a 256 "build/JustHide-$VERSION.zip" | cut -d' ' -f1)
+          # The token comes in through the environment rather than being
+          # interpolated into this script.
           git clone --depth 1 \
-              "https://x-access-token:${{ secrets.TAP_TOKEN }}@github.com/benjustjammin/homebrew-tap.git" \
+              "https://x-access-token:$TAP_TOKEN@github.com/benjustjammin/homebrew-tap.git" \
               "$RUNNER_TEMP/tap"
           cd "$RUNNER_TEMP/tap"
           sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" \
