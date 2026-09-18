@@ -21,11 +21,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var autoHidePopUp: NSPopUpButton?
     private var shortcutButton: NSButton?
     private var quirksNote: NSTextField?
-    private var permissionNote: NSTextField?
-    private var permissionButton: NSButton?
-    private var recheckButton: NSButton?
-    private var permissionTop: NSLayoutConstraint?
-    private var permissionHeight: NSLayoutConstraint?
     private var mechanismRow: NSStackView?
     private var mechanismNote: NSTextField?
     private var mechanismButton: NSButton?
@@ -136,30 +131,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         let perAppNote = label("Hiding applies to a whole app, not to one of its icons.",
                                secondary: true)
 
-        // ---- Accessibility, which only the list above depends on. Collapsed to
-        // nothing once it is granted: a permission the user has already given is
-        // not worth a row of the window.
-        let permissionNote = label(AccessibilityAccess.explanation, secondary: true)
-        permissionNote.textColor = .systemOrange
-        self.permissionNote = permissionNote
-        let permissionButton = NSButton(title: "Allow\u{2026}", target: self,
-                                        action: #selector(requestAccessibility))
-        permissionButton.bezelStyle = .rounded
-        permissionButton.controlSize = .small
-        permissionButton.translatesAutoresizingMaskIntoConstraints = false
-        self.permissionButton = permissionButton
-        // Granting happens in System Settings, and nothing tells us when it has
-        // been done -- so there is an explicit way to ask again, rather than the
-        // user wondering whether the window has noticed.
-        let recheckButton = NSButton(title: "Re-check", target: self, action: #selector(recheck))
-        recheckButton.bezelStyle = .rounded
-        recheckButton.controlSize = .small
-        recheckButton.translatesAutoresizingMaskIntoConstraints = false
-        self.recheckButton = recheckButton
-        let permissionRow = NSStackView(views: [permissionNote, permissionButton, recheckButton])
-        permissionRow.orientation = .horizontal
-        permissionRow.spacing = 8
-        permissionRow.translatesAutoresizingMaskIntoConstraints = false
+        // No Accessibility row. Hiding works without the permission -- it is only
+        // needed to LIST what is in the bar right now -- so a standing orange
+        // warning here was a nag for something that breaks nothing. The ask now
+        // lives in the app picker, which is the one place it makes a difference,
+        // and the list's third button re-reads it.
 
         // ---- How hiding is going. Collapsed to nothing while it is going
         // fine, which is nearly always -- but when it is not, this is the only
@@ -258,7 +234,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         ])
 
         for view in [iconView, name, subtitle, updateRow, listLabel, scroll, listButtons, perAppNote,
-                     permissionRow, mechanismRow, optionsLabel,
+                     mechanismRow, optionsLabel,
                      loginCheckbox, hoverCheckbox, updatesCheckbox, autoHideLabel, autoHidePopUp,
                      shortcutLabel, shortcutButton, glyphLabel, glyphPopUp,
                      quirksLabel, quirksBox] {
@@ -303,10 +279,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             perAppNote.centerYAnchor.constraint(equalTo: listButtons.centerYAnchor),
             perAppNote.leadingAnchor.constraint(equalTo: listButtons.trailingAnchor, constant: 10),
 
-            permissionRow.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            permissionRow.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor,
-                                                    constant: -margin),
-
             mechanismRow.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
             mechanismRow.trailingAnchor.constraint(equalTo: content.trailingAnchor,
                                                    constant: -margin),
@@ -349,17 +321,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             quirksBox.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -margin),
         ])
 
-        let permissionTop = permissionRow.topAnchor.constraint(equalTo: listButtons.bottomAnchor,
-                                                               constant: 12)
-        let permissionHeight = permissionRow.heightAnchor.constraint(equalToConstant: 22)
-        NSLayoutConstraint.activate([permissionTop, permissionHeight])
-        self.permissionTop = permissionTop
-        self.permissionHeight = permissionHeight
-
         // The mechanism row's height is its content, not a constant: the note
         // wraps to however many lines it needs. Only the collapsed state is a
         // fixed height, so that constraint is the one switched on and off.
-        let mechanismTop = mechanismRow.topAnchor.constraint(equalTo: permissionRow.bottomAnchor,
+        let mechanismTop = mechanismRow.topAnchor.constraint(equalTo: listButtons.bottomAnchor,
                                                              constant: 12)
         mechanismTop.isActive = true
         self.mechanismTop = mechanismTop
@@ -369,7 +334,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         snug.priority = .defaultLow
         snug.isActive = true
 
-        applyPermissionState()
         applyMechanismState()
         applyUpdateState()
 
@@ -399,15 +363,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             "• While icons are hidden, clicking the clock will not open Notification "
             + "Center. Swipe from the right edge, or reveal first.",
         ]
-        if Settings.glyph.flips {
-            notes.append("• You have chosen a symbol that flips. On the display your "
-                         + "icons live on it is always right, but a second display "
-                         + "redraws it one change late, so the arrow points the wrong "
-                         + "way there. Choose a symbol without \"flips\" to avoid it.")
-        } else {
-            notes.append("• This symbol stays the same whether icons are hidden or "
-                         + "shown, which is why it is correct on every display.")
-        }
         if Mechanism.current == .concealment {
             notes.append("• Hiding uses a part of macOS 27 that Apple does not document. If an "
                          + "update ever takes it away, JustHide says so on its symbol and offers "
@@ -463,7 +418,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         // The notes depend on the chosen symbol, so they are rebuilt here.
         quirksNote?.stringValue = Self.quirksText
-        applyPermissionState()
         applyMechanismState()
         applyUpdateState()
         // Opening Settings is the moment someone is wondering, so this is where
@@ -594,18 +548,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         Mechanism.use(Mechanism.current == .width ? .concealment : .width)
     }
 
-    private func applyPermissionState() {
-        let granted = AccessibilityAccess.isGranted
-        permissionNote?.stringValue = AccessibilityAccess.explanation
-        permissionNote?.isHidden = granted
-        permissionButton?.isHidden = granted
-        recheckButton?.isHidden = granted
-        // A hidden view still holds its space under Auto Layout, so the row is
-        // collapsed rather than merely hidden.
-        permissionHeight?.constant = granted ? 0 : 22
-        permissionTop?.constant = granted ? 0 : 12
-    }
-
     /// Re-reads the permission and the app list. Also on the \u{21BB} button by the
     /// list, for when an app has been opened since the window was.
     @objc private func recheck() {
@@ -630,16 +572,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         case .alertSecondButtonReturn: AccessibilityAccess.openSystemSettings()
         default: break
         }
-    }
-
-    @objc private func requestAccessibility() {
-        // The system shows its dialog at most once per process, so from the
-        // second press on the only thing that can help is the Settings pane.
-        // Do both: whichever is available wins.
-        if !AccessibilityAccess.request() {
-            AccessibilityAccess.openSystemSettings()
-        }
-        reload()
     }
 
     // MARK: - Hidden apps

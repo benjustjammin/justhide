@@ -63,11 +63,15 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         title.translatesAutoresizingMaskIntoConstraints = false
 
+        // Stated plainly rather than warned about: the permission changes what
+        // this list can sort, and nothing else. Hiding works without it, so the
+        // orange it used to be was out of proportion.
         let note = NSTextField(labelWithString: accessibilityGranted
             ? "Apps in your menu bar now are listed first."
-            : "Without Accessibility JustHide cannot tell which apps own icons, so every running app is listed.")
+            : "Every running app is listed. Allow Accessibility and JustHide can put the ones "
+                + "in your menu bar first.")
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        note.textColor = accessibilityGranted ? .secondaryLabelColor : .systemOrange
+        note.textColor = .secondaryLabelColor
         note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 0
         note.preferredMaxLayoutWidth = 380
@@ -102,6 +106,23 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         other.bezelStyle = .rounded
         other.translatesAutoresizingMaskIntoConstraints = false
 
+        // Shown only while the permission is missing, so it disappears once it
+        // has been given rather than sitting there for ever. It sits under the
+        // note that explains it, in a stack view -- which collapses a hidden
+        // view rather than leaving a gap where it would have been.
+        let allow = NSButton(title: "Allow Accessibility\u{2026}", target: self,
+                             action: #selector(requestAccessibility))
+        allow.bezelStyle = .rounded
+        allow.controlSize = .small
+        allow.isHidden = accessibilityGranted
+        allow.translatesAutoresizingMaskIntoConstraints = false
+
+        let explanation = NSStackView(views: [note, allow])
+        explanation.orientation = .vertical
+        explanation.alignment = .leading
+        explanation.spacing = 6
+        explanation.translatesAutoresizingMaskIntoConstraints = false
+
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
@@ -113,18 +134,21 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         add.translatesAutoresizingMaskIntoConstraints = false
         addButton = add
 
-        for view in [title, note, search, scroll, other, cancel, add] { content.addSubview(view) }
+        for view in [title, explanation, search, scroll, other, cancel, add] {
+            content.addSubview(view)
+        }
 
         let margin: CGFloat = 20
         NSLayoutConstraint.activate([
             title.topAnchor.constraint(equalTo: content.topAnchor, constant: margin),
             title.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
 
-            note.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
-            note.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
-            note.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            explanation.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
+            explanation.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
+            explanation.trailingAnchor.constraint(equalTo: content.trailingAnchor,
+                                                  constant: -margin),
 
-            search.topAnchor.constraint(equalTo: note.bottomAnchor, constant: 10),
+            search.topAnchor.constraint(equalTo: explanation.bottomAnchor, constant: 10),
             search.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
             search.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
@@ -167,6 +191,14 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     @objc private func cancel() {
         finish(with: [])
+    }
+
+    /// The system shows its dialog at most once per process, so from the second
+    /// press on the only thing that can help is the Settings pane. Try both.
+    @objc private func requestAccessibility() {
+        if !AccessibilityAccess.request() {
+            AccessibilityAccess.openSystemSettings()
+        }
     }
 
     /// The file picker, for an app that is not running and has never been seen:

@@ -105,10 +105,6 @@ macOS 27 works rather than choices:
 - **While icons are hidden, clicking the clock won't open Notification Center.**
   Swipe in from the right edge, or reveal first. Wi-Fi and Control Centre are
   unaffected.
-- **Flipping symbols point the wrong way on a second display.** macOS redraws a
-  status item one change late on a mirrored bar, so a chevron that flips direction
-  will be backwards over there. The fixed symbols avoid it entirely, and Settings
-  tells you which family you've picked.
 - **This uses part of macOS that Apple doesn't document.** If an update breaks it,
   JustHide says so on its menu bar symbol and offers you the older layout-based
   method there and then — in the dialog, in the symbol's menu, and in Settings.

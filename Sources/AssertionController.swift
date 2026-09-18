@@ -48,10 +48,10 @@ final class AssertionController: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         Settings.migrateIfNeeded()
-        // Asked up front rather than at the moment it is first needed: the thing
-        // it is needed for is a list in Settings, and a permission dialog that
-        // appears while someone is reading a list is worse than one at launch.
-        AccessibilityAccess.requestOnFirstLaunch()
+        // Nothing is asked for here. Accessibility is needed to LIST what is in
+        // the menu bar, not to hide anything, so the ask belongs in the app
+        // picker -- the one place the answer changes what someone sees -- rather
+        // than in a dialog at every first launch of every new build.
         JustHide.applyGlyph(to: chevron, concealed: false)
         chevron.button?.target = self
         chevron.button?.action = #selector(chevronClicked)

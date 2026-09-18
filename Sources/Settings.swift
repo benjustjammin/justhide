@@ -67,13 +67,15 @@ enum Settings {
 
     /// The menu bar glyph.
     ///
-    /// Two families. A FIXED glyph looks the same whether icons are hidden or
-    /// shown, and is always correct everywhere. A FLIPPING one points one way
-    /// when hidden and the other when shown, which reads better on the display
-    /// the items actually live on -- but a mirrored second display redraws the
-    /// item one state late, so over there it shows the wrong direction. Whether
-    /// that matters depends on which screen you work on, so it is a choice
-    /// rather than a decision made for the user.
+    /// Two families: a FIXED glyph that looks the same in both states, and a
+    /// FLIPPING one that points one way when hidden and the other when shown.
+    ///
+    /// The flipping ones used to be a trap -- a second display showed the wrong
+    /// direction -- which is why they are labelled. That was not the glyph's
+    /// fault: while an assertion is held the secondary bar's copy of the item
+    /// stops updating, so the glyph has to be drawn BEFORE concealment goes up
+    /// (see AssertionController.conceal). With that order they are correct on
+    /// every display, and the choice is now only a matter of taste.
     enum Glyph: String, CaseIterable {
         case chevronFlipping = "chevron.flipping"
         case doubleChevronFlipping = "doubleChevron.flipping"
@@ -83,7 +85,8 @@ enum Settings {
         case dot = "\u{2022}"              // •
         case bars = "\u{2261}"             // ≡
 
-        /// True if the symbol changes with state, and so can lag on a mirror.
+        /// True if the symbol changes with state. Kept because the labels use
+        /// it; no longer a warning about anything.
         var flips: Bool {
             self == .chevronFlipping || self == .doubleChevronFlipping
         }

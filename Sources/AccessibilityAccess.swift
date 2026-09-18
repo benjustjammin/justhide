@@ -9,8 +9,9 @@
 //  which AXExtrasMenuBar is the only route left on macOS 27. Without it the
 //  "add an app" list cannot say what is in the bar right now, and a newly
 //  launched app's icon cannot be checked before the allowlist is refreshed.
-//  Both of those degrade rather than break, which is why this asks once and then
-//  leaves a button in Settings instead of nagging at every launch.
+//  Both of those degrade rather than break, which is why nothing is asked for at
+//  launch and there is no warning in Settings. The ask is a button in the app
+//  picker, which is the list the permission actually changes.
 //
 //  Worth knowing: TCC keys the grant on the code signature, and an ad-hoc build
 //  gets a new one every time it is compiled, so a rebuilt JustHide loses the
@@ -40,18 +41,6 @@ enum AccessibilityAccess {
         UserDefaults.standard.set(true, forKey: didAskKey)
         let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         return AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
-    }
-
-    /// Asked on first launch, so the app appears in the Accessibility list with
-    /// a switch to flick rather than the user having to know to add it. Once.
-    static func requestOnFirstLaunch() {
-        guard !UserDefaults.standard.bool(forKey: didAskKey) else { return }
-        guard !isGranted else {
-            UserDefaults.standard.set(true, forKey: didAskKey)
-            return
-        }
-        Log.controller.log("asking for Accessibility for the first time")
-        request()
     }
 
     /// The Accessibility pane itself, for when the dialog has been dismissed
