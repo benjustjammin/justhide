@@ -12,6 +12,7 @@ enum Settings {
 
     private enum Key {
         static let hiddenBundleIDs = "hiddenBundleIDs"
+        static let listedBundleIDs = "listedBundleIDs"
         static let glyph = "glyph"
         static let autoHideDelay = "autoHideDelay"
         static let didMigrateFromNook = "didMigrateFromNook"
@@ -54,11 +55,48 @@ enum Settings {
 
     // MARK: - Hidden apps
 
+    /// Apps the list in Settings shows.
+    ///
+    /// Separate from `hiddenBundleIDs` since 2026-09-22, because the two stopped
+    /// meaning the same thing: a shortcut opens an icon whether or not it is
+    /// hidden, so an app can be worth listing purely to give its icons
+    /// shortcuts. Vorssaint is the case that forced it -- readouts kept visible
+    /// but wanted on keys. Hidden is a tick box on the row; being listed is what
+    /// the + and - buttons control. Every hidden app is necessarily listed.
+    static var listedBundleIDs: Set<String> {
+        get {
+            guard let stored = defaults.stringArray(forKey: Key.listedBundleIDs) else {
+                // Upgrading: everything hidden was by definition in the old
+                // list, and anything holding a shortcut belongs there too or its
+                // shortcut would have nowhere to be shown.
+                return hiddenBundleIDs.union(itemShortcuts.keys.map(\.bundleID))
+            }
+            return Set(stored).union(hiddenBundleIDs)
+        }
+        set {
+            defaults.set(newValue.sorted(), forKey: Key.listedBundleIDs)
+            // Nothing may be hidden without being listed, or it would be
+            // concealed with no row anywhere saying so. Assigning hiddenBundleIDs
+            // posts the change notification itself.
+            if hiddenBundleIDs.subtracting(newValue).isEmpty {
+                NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+            } else {
+                hiddenBundleIDs = hiddenBundleIDs.intersection(newValue)
+            }
+        }
+    }
+
     /// Bundle identifiers whose menu bar items are hidden.
     static var hiddenBundleIDs: Set<String> {
         get { Set(defaults.stringArray(forKey: Key.hiddenBundleIDs) ?? []) }
         set {
             defaults.set(newValue.sorted(), forKey: Key.hiddenBundleIDs)
+            // The same invariant from the other side: ticking Hidden on a row
+            // that is somehow not listed should list it.
+            let listed = Set(defaults.stringArray(forKey: Key.listedBundleIDs) ?? [])
+            if !newValue.subtracting(listed).isEmpty {
+                defaults.set(listed.union(newValue).sorted(), forKey: Key.listedBundleIDs)
+            }
             NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
         }
     }

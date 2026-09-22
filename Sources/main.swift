@@ -77,6 +77,31 @@ if arguments.contains("--list") {
 
 // What the "add an app" list in Settings would offer, and why. Useful when an app
 // that is plainly in the bar does not turn up in that list.
+// What each app in the bar publishes about its own icons, which is what decides
+// whether they can take a shortcut each. Apps differ a lot here, so this is the
+// quickest way to find out before promising anything.
+if arguments.contains("--items") {
+    print("Accessibility trusted: \(AXIsProcessTrusted()) (this process; a terminal's grant is inherited)")
+    let owners = Set(AXMenuBar.currentItems().compactMap {
+        NSRunningApplication(processIdentifier: $0.ownerPID)?.bundleIdentifier
+    })
+    for bundleID in owners.sorted() {
+        let items = MenuBarItemCatalogue.discover(bundleID: bundleID)
+        guard !items.isEmpty else { continue }
+        print("\n\(MenuBarApps.displayName(for: bundleID))  [\(bundleID)]")
+        for item in items {
+            // One unnamed item is still bindable -- "this app's only icon" needs
+            // no name. Several unnamed ones are not, because nothing says which.
+            let unnamed = items.count == 1
+                ? "-- none published, bindable as this app's only icon"
+                : "-- none published, so this icon cannot take a shortcut of its own"
+            print("    label: \(item.label)")
+            print("    id:    \(item.identity ?? unnamed)")
+        }
+    }
+    exit(0)
+}
+
 if arguments.contains("--apps") {
     // Careful reading this: a process started from a terminal inherits THAT
     // terminal's Accessibility grant, so this can say true while the app itself

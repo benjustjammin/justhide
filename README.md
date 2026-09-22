@@ -28,14 +28,16 @@ It does one job. There is no floating bar, no icon previews, no groups, no profi
 
 - macOS 27 (Golden Gate) or later
 - No Screen Recording, no Developer ID, no sandbox exceptions
-- Accessibility is **optional**, and asked for once on first launch.[^ax]
+- Accessibility is **optional**, and never asked for at launch.[^ax]
 
-[^ax]: Hiding needs no permission at all. Accessibility buys two niceties: listing
-which apps have menu bar icons right now, so the picker can show them, and checking
+[^ax]: Hiding needs no permission at all. Accessibility buys four things: listing
+which apps have menu bar icons right now, so the picker can show them; checking
 whether a newly launched app actually put an icon up before the allowlist is
-refreshed. Refuse it and everything still works — you add apps from the same picker
-or with **Other App…**. Settings shows an **Allow…** and a **Re-check** button while
-it is missing, and both disappear once it is granted.
+refreshed; per-icon keyboard shortcuts; and letting the clock through. The first two
+degrade quietly — you add apps from the same picker or with **Other App…** — but the
+last two do nothing without it, so Settings shows a notice when one of them is on and
+the permission is missing. The picker's **Allow…** button is the ask, and its **↻**
+re-reads the answer.
 
 ## Install
 
@@ -65,13 +67,15 @@ Applications folder: macOS only honours the concealment allowlist for an app run
 from one, so a copy left in `~/Downloads` or a build directory will look like it is
 working and hide nothing.
 
-> **Rebuilding?** `build.sh` ad-hoc signs by default, and an ad-hoc signature changes
-> with every build — which quietly invalidates the Accessibility grant you just gave
-> it, so the permission appears to come undone on its own. Make a self-signed
-> certificate called `JustHide Dev` in Keychain Access (Certificate Assistant →
+> **Rebuilding?** An ad-hoc signature changes with every build — which quietly
+> invalidates the Accessibility grant you just gave it, so the permission appears to
+> come undone on its own. `build.sh` avoids that where it can: it signs with your
+> **Developer ID Application** certificate if you have one, else a self-signed
+> certificate called `JustHide Dev`, and only falls back to ad-hoc when there is
+> neither. Make the self-signed one in Keychain Access (Certificate Assistant →
 > Create a Certificate → Self Signed Root, Code Signing) and the script picks it up
-> automatically, and the grant survives. `tccutil reset Accessibility dev.justhide.app`
-> clears a stale entry if one gets stuck.
+> automatically. `tccutil reset Accessibility dev.justhide.app` clears a stale entry
+> if one gets stuck.
 
 ## Using it
 
@@ -85,6 +89,14 @@ In Settings, **+** opens a list of your apps with their icons: the ones with men
 icons right now first, then any that have had one before and are still running.
 Search it, pick several at once, or use **Other App…** for something that isn't
 running. **↻** re-reads the list — and the Accessibility permission with it.
+
+Each row in that list has two more columns. **Hidden** is the tick box that decides
+whether the app's icons are concealed; apps arrive ticked, and unticking one keeps it
+in the bar while leaving it in the list. **Shortcut** gives one of its icons a key
+combination that *opens that icon's menu or panel without revealing it* — the hidden
+thing answers where it would have been, and the same keys close it again. Apps that
+publish names for their icons (iStat Menus, Vorssaint) let you pick which one; an app
+with a single icon needs no name. This one needs Accessibility.
 
 JustHide never moves anything. Where each icon sits is macOS's business (see below),
 so ⌘-drag them into the order you want and macOS will remember it.
@@ -102,9 +114,12 @@ macOS 27 works rather than choices:
   remembered in *that app's* preferences, which is why the order never follows the
   order you opened things in. ⌘-drag is the only thing that changes it, yours or
   anyone's: no app can move another app's icon on macOS 27.
-- **While icons are hidden, clicking the clock won't open Notification Center.**
-  Swipe in from the right edge, or reveal first. Wi-Fi and Control Centre are
-  unaffected.
+- **While icons are hidden, clicking the clock won't open Notification Center** —
+  unless you turn on **Clock opens Notification Center**, which stands the
+  concealment down for as long as the panel is open and puts it back when you close
+  it. That costs a brief flash of your hidden icons, and needs Accessibility. Left
+  off, swipe in from the right edge or reveal first. Wi-Fi and Control Centre are
+  unaffected either way.
 - **This uses part of macOS that Apple doesn't document.** If an update breaks it,
   JustHide says so on its menu bar symbol and offers you the older layout-based
   method there and then — in the dialog, in the symbol's menu, and in Settings.
@@ -244,7 +259,8 @@ Sources/
                               draw icons on 27)
   AccessibilityAccess.swift   asking for, and re-checking, the one permission
   Settings.swift              what the user can change
-  GlobalHotkey.swift          keyboard shortcut (Carbon, needs no permission)
+  GlobalHotkey.swift          keyboard shortcuts (Carbon, needs no permission)
+  MenuBarItemShortcuts.swift  pressing a hidden icon from the keyboard
   MenuBarApps.swift           which apps own menu bar icons
   AXMenuBarItems.swift        reading the bar through Accessibility
   LaunchAtLogin.swift         SMAppService

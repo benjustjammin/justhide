@@ -10,8 +10,15 @@
 //  "add an app" list cannot say what is in the bar right now, and a newly
 //  launched app's icon cannot be checked before the allowlist is refreshed.
 //  Both of those degrade rather than break, which is why nothing is asked for at
-//  launch and there is no warning in Settings. The ask is a button in the app
-//  picker, which is the list the permission actually changes.
+//  launch. The ask is a button in the app picker, which is the list the
+//  permission actually changes.
+//
+//  That reasoning stopped covering everything on 2026-09-21. The clock option
+//  and the per-item shortcuts do NOT degrade without Accessibility -- they do
+//  nothing at all -- and with no warning anywhere they simply looked broken
+//  after a reinstall dropped the grant. So Settings now shows a notice, but only
+//  when the permission is missing AND one of those is switched on: still no
+//  standing nag for someone who only hides icons.
 //
 //  Worth knowing: TCC keys the grant on the code signature, and an ad-hoc build
 //  gets a new one every time it is compiled, so a rebuilt JustHide loses the
@@ -51,6 +58,42 @@ enum AccessibilityAccess {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Presses the clock, to replay a click that the concealment assertion
+    /// swallowed. See AssertionController.clockClicked for why this is needed
+    /// and what was measured.
+    ///
+    /// The element is found here, on each call, rather than cached: one looked
+    /// up while a restriction was active does not respond to a press afterwards.
+    @discardableResult
+    static func pressClock() -> Bool {
+        guard isGranted else { return false }
+        guard let agent = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier == "com.apple.MenuBarAgent"
+        }) else { return false }
+        func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success
+            else { return nil }
+            return value
+        }
+        guard let extras = attribute(AXUIElementCreateApplication(agent.processIdentifier),
+                                     "AXExtrasMenuBar"),
+              CFGetTypeID(extras) == AXUIElementGetTypeID(),
+              let groups = attribute(extras as! AXUIElement,
+                                     kAXChildrenAttribute) as? [AXUIElement]
+        else { return false }
+        // The clock is a child of a hosting group, not a top-level item.
+        for group in groups {
+            let children = (attribute(group, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+            for child in children
+            where attribute(child, "AXIdentifier") as? String == AXMenuBar.clockIdentifier {
+                AXUIElementPerformAction(child, kAXPressAction as CFString)
+                return true
+            }
+        }
+        return false
     }
 
     /// Starts JustHide again and quits this copy.

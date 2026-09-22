@@ -59,7 +59,10 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         let content = NSView()
         panel.contentView = content
 
-        let title = NSTextField(labelWithString: "Choose apps whose menu bar icons should hide")
+        // Not "apps to hide" any more: adding one puts it in the list, and the
+        // Hidden tick box on its row decides the rest. Added apps do arrive
+        // ticked, which is what the subtitle says.
+        let title = NSTextField(labelWithString: "Add apps to your menu bar list")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         title.translatesAutoresizingMaskIntoConstraints = false
 
@@ -67,7 +70,8 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         // this list can sort, and nothing else. Hiding works without it, so the
         // orange it used to be was out of proportion.
         let note = NSTextField(labelWithString: accessibilityGranted
-            ? "Apps in your menu bar now are listed first."
+            ? "Apps in your menu bar now are listed first. They are added hidden; "
+              + "untick Hidden to keep one visible and use it just for shortcuts."
             : "Every running app is listed. Allow Accessibility and JustHide can put the ones "
                 + "in your menu bar first.")
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)

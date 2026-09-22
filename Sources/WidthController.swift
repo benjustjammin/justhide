@@ -330,6 +330,7 @@ final class WidthController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Shortcut
 
     private func applyShortcut() {
+        GlobalHotkey.shared.applyItemShortcuts()
         GlobalHotkey.shared.update { [weak self] in
             guard let self = self else { return }
             self.isCollapsed ? self.expand() : self.collapse()

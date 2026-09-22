@@ -38,11 +38,21 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     private var autoHideTimer: Timer?
     private var hoverMonitor: Any?
     private var hoverDwellTimer: Timer?
+    private var clockRestoreTimer: Timer?
+    private var clockFrame: CGRect?
+    private var clockFrameReadAt: Date?
+    /// Concealment lifted for the clock, rather than by the user. Everything
+    /// else -- the glyph, the auto-hide timer, the newcomer watch -- goes on
+    /// treating the icons as hidden, because as far as the user is concerned
+    /// they are; only the assertion is down.
+    private var suspendedForClock = false
+    /// So the watcher can tell "not open yet" from "opened and has now closed".
+    private var sawNotificationCentreOpen = false
     private var allowlistTimer: Timer?
     private var runningAppsObserver: NSKeyValueObservation?
     private var knownPIDs: Set<pid_t> = []
 
-    private var isConcealed: Bool { token != nil }
+    private var isConcealed: Bool { token != nil || suspendedForClock }
 
     private var hiddenBundleIDs: Set<String> { Settings.hiddenBundleIDs }
 
@@ -164,6 +174,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
                 let previous = self.token
                 self.token = token
                 previous?.invalidate()
+                self.endClockSuspension()
                 JustHide.applyGlyph(to: self.chevron, concealed: true)
                 self.autoHideTimer?.invalidate()
                 Mechanism.report(failure: nil)
@@ -183,6 +194,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     }
 
     private func reveal() {
+        endClockSuspension()
         token?.invalidate()
         token = nil
         Mechanism.report(failure: nil)
@@ -277,6 +289,8 @@ final class AssertionController: NSObject, NSApplicationDelegate {
 
     @objc private func screensChanged() {
         Log.controller.log("displays changed; re-applying the glyph")
+        // The bar may have moved to another display, taking the clock with it.
+        clockFrameReadAt = nil
         refreshGlyph()
         // Again once the new arrangement has settled: the notification arrives
         // while the bars are still being rebuilt, so the first pass can be drawn
@@ -311,6 +325,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     // MARK: - Shortcut and hover
 
     private func applyShortcut() {
+        GlobalHotkey.shared.applyItemShortcuts()
         GlobalHotkey.shared.update { [weak self] in
             guard let self = self else { return }
             self.isConcealed ? self.reveal() : self.conceal(userAsked: true)
@@ -327,24 +342,182 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             hoverMonitor = nil
         }
         hoverDwellTimer?.invalidate()
-        guard Settings.hoverToReveal else { return }
+        hoverDwellTimer = nil
+        // Two features share the one monitor: revealing on hover, and standing
+        // aside for the clock. Either is reason enough to watch the pointer.
+        guard Settings.hoverToReveal || Settings.clockClickThrough else {
+            // Turning the clock option off mid-suspension must not leave the
+            // icons out.
+            endClockSuspension(puttingConcealmentBack: true)
+            return
+        }
 
-        hoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+        var mask: NSEvent.EventTypeMask = []
+        if Settings.hoverToReveal { mask.insert(.mouseMoved) }
+        if Settings.clockClickThrough { mask.insert(.leftMouseUp) }
+        hoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
             guard let self = self else { return }
-            guard self.isConcealed, MenuBarGeometry.pointerIsInMenuBar else {
-                self.hoverDwellTimer?.invalidate()
-                self.hoverDwellTimer = nil
-                return
+            if event.type == .leftMouseUp {
+                self.clockClicked()
+            } else {
+                self.pointerMoved()
             }
-            // A short dwell, so merely crossing the bar does not open it.
-            guard self.hoverDwellTimer == nil else { return }
-            self.hoverDwellTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                guard let self = self else { return }
-                self.hoverDwellTimer = nil
-                if self.isConcealed, MenuBarGeometry.pointerIsInMenuBar {
-                    self.reveal()
-                }
+        }
+    }
+
+    private func pointerMoved() {
+        guard Settings.hoverToReveal else { return }
+        // Standing aside for the clock must not turn into a full reveal: a
+        // glance at the time is not a request to open the bar.
+        guard isConcealed, !suspendedForClock, MenuBarGeometry.pointerIsInMenuBar else {
+            hoverDwellTimer?.invalidate()
+            hoverDwellTimer = nil
+            return
+        }
+        // A short dwell, so merely crossing the bar does not open it.
+        guard hoverDwellTimer == nil else { return }
+        hoverDwellTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            self.hoverDwellTimer = nil
+            if self.isConcealed, !self.suspendedForClock, MenuBarGeometry.pointerIsInMenuBar {
+                self.reveal()
             }
+        }
+    }
+
+    // MARK: - Standing aside for the clock
+
+    /// The clock is the one casualty of this mechanism: while an assertion is
+    /// held MenuBarAgent ignores clicks on its OWN items, so Notification Centre
+    /// cannot be opened.
+    ///
+    /// Driven by the CLICK, not by hovering. Hover was tried first and Ben's
+    /// verdict was that it is far too keen -- the top right corner is a route
+    /// the pointer takes constantly, and every crossing brought the hidden icons
+    /// back. A click is unambiguous: you only click the clock when you want the
+    /// clock.
+    ///
+    /// The cost of waiting for the click is that the click itself is already
+    /// gone: it reached MenuBarAgent while the assertion was still up, and was
+    /// ignored. So it is replayed. Measured on 27.0 (26A428):
+    ///   - assertion held: `AXUIElementPerformAction(clock, kAXPressAction)`
+    ///     returns 0 and nothing opens, the same silent refusal a real click gets
+    ///   - assertion invalidated: the same press opens Notification Centre
+    /// which is what makes replaying work at all. The element is looked up after
+    /// the assertion is down, since one found while it was up does not respond.
+    private func clockClicked() {
+        guard Settings.clockClickThrough, isConcealed, !suspendedForClock,
+              let clock = currentClockFrame() else { return }
+        // Only the x range is compared. The clock's frame comes from
+        // Accessibility, whose origin is the top left, while NSEvent.mouseLocation
+        // counts up from the bottom left -- and pointerIsInMenuBar has already
+        // settled the vertical question for every attached display, so flipping
+        // coordinates here would add a second chance to get it wrong.
+        let mouse = NSEvent.mouseLocation
+        guard MenuBarGeometry.pointerIsInMenuBar,
+              mouse.x >= clock.minX - 2, mouse.x <= clock.maxX + 2 else { return }
+
+        guard let token = token else { return }
+        suspendedForClock = true
+        token.invalidate()
+        self.token = nil
+        Log.controller.log("clock clicked; concealment suspended")
+
+        // A beat for MenuBarAgent to notice the restriction has gone, then
+        // replay -- but only if the panel did not open by itself. Between our
+        // mouse-up and here the real click can occasionally get through, and
+        // pressing as well would toggle it straight back shut.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self = self, self.suspendedForClock else { return }
+            if !Self.notificationCentreIsOpen {
+                AccessibilityAccess.pressClock()
+            }
+            self.watchForNotificationCentreClosing(attempt: 0)
+        }
+    }
+
+    /// Re-conceals once the panel has gone, which is the "click off" half of
+    /// what Ben asked for. Polled rather than observed: Notification Centre
+    /// posts nothing we can subscribe to, and its window appearing and
+    /// disappearing in the window list is the only signal there is.
+    ///
+    /// The attempt count is a safety net. If the press never landed -- no
+    /// Accessibility, a future macOS that moves the clock -- nothing would ever
+    /// close and the icons would stay out for the rest of the session.
+    private func watchForNotificationCentreClosing(attempt: Int) {
+        clockRestoreTimer?.invalidate()
+        // Half a minute of looking, then give up and put the bar back.
+        guard attempt < 75 else {
+            Log.controller.log("Notification Centre never opened or never closed; concealing again")
+            restoreAfterClock()
+            return
+        }
+        clockRestoreTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+            guard let self = self, self.suspendedForClock else { return }
+            // Never seen open yet: keep waiting, it may still be coming up.
+            if Self.notificationCentreIsOpen {
+                self.sawNotificationCentreOpen = true
+                self.watchForNotificationCentreClosing(attempt: attempt + 1)
+            } else if self.sawNotificationCentreOpen {
+                self.restoreAfterClock()
+            } else {
+                self.watchForNotificationCentreClosing(attempt: attempt + 1)
+            }
+        }
+    }
+
+    private func restoreAfterClock() {
+        clockRestoreTimer?.invalidate()
+        clockRestoreTimer = nil
+        guard suspendedForClock else { return }
+        suspendedForClock = false
+        sawNotificationCentreOpen = false
+        Log.controller.log("Notification Centre closed; concealing again")
+        conceal()
+    }
+
+    /// Clears the suspension. The user-driven paths -- a click, the shortcut, a
+    /// reveal -- want the state cleared and nothing else, because they are about
+    /// to decide for themselves what the bar should look like.
+    private func endClockSuspension(puttingConcealmentBack: Bool = false) {
+        clockRestoreTimer?.invalidate()
+        clockRestoreTimer = nil
+        let wasSuspended = suspendedForClock
+        suspendedForClock = false
+        sawNotificationCentreOpen = false
+        if puttingConcealmentBack, wasSuspended { conceal() }
+    }
+
+    /// Cached, because mouse-moved fires far too often to ask Accessibility each
+    /// time, and re-read often enough to follow the clock as its width changes
+    /// with the date string or the bar moves between displays.
+    private func currentClockFrame() -> CGRect? {
+        if let readAt = clockFrameReadAt, Date().timeIntervalSince(readAt) < 5 {
+            return clockFrame
+        }
+        clockFrame = AXMenuBar.clockFrame()
+        clockFrameReadAt = Date()
+        if clockFrame == nil {
+            // Without Accessibility there is no way to know where the clock is,
+            // so the option silently does nothing. Say so once in a while rather
+            // than leaving someone wondering why their click is still dead.
+            Log.controller.log("cannot locate the clock; Accessibility is needed for the clock option")
+        }
+        return clockFrame
+    }
+
+    /// Measured on 27.0: while the panel is open, Notification Centre owns an
+    /// on-screen window (layer 21, full screen); closed, it owns none. Matched on
+    /// the owning process's bundle identifier rather than the window name, which
+    /// is localised -- and reading names is the part that would need Screen
+    /// Recording, while the owner and bounds do not.
+    private static var notificationCentreIsOpen: Bool {
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                 kCGNullWindowID) as? [[String: Any]] ?? []
+        return windows.contains { window in
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t else { return false }
+            return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+                == "com.apple.notificationcenterui"
         }
     }
 

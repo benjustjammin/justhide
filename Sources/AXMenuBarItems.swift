@@ -84,6 +84,40 @@ enum AXMenuBar {
         return !children.isEmpty
     }
 
+    /// Where the clock sits, so concealment can be lifted while the pointer is
+    /// over it (see AssertionController.applyHoverMonitor).
+    ///
+    /// Two details, both measured on 27.0 (26A428). The clock is NOT a top-level
+    /// child of MenuBarAgent's AXExtrasMenuBar: the children there are AXGroups
+    /// with the AXHostingView subrole, and the real item is one level down --
+    /// enumerating only the top level misses it. And it identifies itself, so
+    /// this needs no guessing about which item is the widest or rightmost:
+    /// AXIdentifier "com.apple.menuextra.clock", AXDescription "Clock", with the
+    /// localised date string as its value.
+    static func clockFrame() -> CGRect? {
+        guard let agent = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier == "com.apple.MenuBarAgent"
+        }) else { return nil }
+        guard let extrasRef = copy(AXUIElementCreateApplication(agent.processIdentifier),
+                                   "AXExtrasMenuBar"),
+              CFGetTypeID(extrasRef) == AXUIElementGetTypeID(),
+              let groups = copy(extrasRef as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement]
+        else { return nil }
+
+        for group in groups {
+            guard let children = copy(group, kAXChildrenAttribute) as? [AXUIElement] else { continue }
+            for child in children where copy(child, "AXIdentifier") as? String == clockIdentifier {
+                // The hosting group is what actually occupies the bar; the item
+                // inside it is the thing that names itself. Prefer the item's own
+                // frame and fall back to its group's.
+                return frame(of: child) ?? frame(of: group)
+            }
+        }
+        return nil
+    }
+
+    static let clockIdentifier = "com.apple.menuextra.clock"
+
     /// Every status item every running app exposes, ordered left to right.
     static func currentItems() -> [AXMenuBarItem] {
         var found: [AXMenuBarItem] = []

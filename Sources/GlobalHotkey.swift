@@ -14,22 +14,135 @@
 import Cocoa
 import Carbon.HIToolbox
 
+/// Every shortcut JustHide owns: the one that shows and hides, and one per menu
+/// bar item the user has bound (see MenuBarItemShortcuts).
+///
+/// One Carbon event handler serves the lot, with each registration identified by
+/// the `id` field of its EventHotKeyID and looked up in a table when it fires.
+/// Installing a handler per shortcut would work too, but they would all be
+/// called for every hotkey and each would have to filter.
 final class GlobalHotkey {
     static let shared = GlobalHotkey()
 
-    private var reference: EventHotKeyRef?
+    private struct Registration {
+        let shortcut: Settings.Shortcut
+        let action: () -> Void
+        /// nil while suspended for recording, or when Carbon refused it.
+        var reference: EventHotKeyRef?
+    }
+
     private var handler: EventHandlerRef?
-    private var onPress: (() -> Void)?
-    private static let identifier: UInt32 = 0x4A48   // 'JH'
+    private var registrations: [UInt32: Registration] = [:]
+    private var suspended = false
+    /// Shortcuts Carbon would not take, nearly always because another app got
+    /// there first. Settings shows these back rather than leaving a row looking
+    /// bound to something that never fires.
+    private(set) var rejected: Set<MenuBarItemTarget> = []
+    /// 'JH'. The toggle keeps a fixed id; item shortcuts are numbered after it.
+    private static let toggleID: UInt32 = 0x4A48
+    private var nextItemID: UInt32 = GlobalHotkey.toggleID + 1
 
-    /// Registers the shortcut held in Settings, replacing any previous one.
-    /// Passing no shortcut simply unregisters.
+    /// Registers the show/hide shortcut held in Settings, replacing any
+    /// previous one. No shortcut simply unregisters.
     func update(onPress: @escaping () -> Void) {
-        self.onPress = onPress
-        unregister()
-
+        unregister(id: Self.toggleID)
         guard let shortcut = Settings.hotkey else { return }
+        if register(shortcut, id: Self.toggleID, action: onPress) {
+            Log.controller.log("registered shortcut \(Settings.hotkeyDescription)")
+        } else {
+            Log.controller.error("could not register shortcut \(Settings.hotkeyDescription)")
+        }
+    }
 
+    /// Replaces every item shortcut in one go. Simpler than tracking which one
+    /// changed, and the whole set is rebuilt whenever Settings posts a change.
+    func updateItemShortcuts(_ bindings: [(target: MenuBarItemTarget,
+                                           shortcut: Settings.Shortcut,
+                                           action: () -> Void)]) {
+        for id in registrations.keys where id != Self.toggleID {
+            unregister(id: id)
+        }
+        nextItemID = Self.toggleID + 1
+        rejected = []
+        var registered = 0
+        for binding in bindings {
+            if register(binding.shortcut, id: nextItemID, action: binding.action) {
+                registered += 1
+            } else {
+                // Nearly always because another app already owns the
+                // combination. Settings shows this back to the user.
+                rejected.insert(binding.target)
+                Log.controller.error("could not register item shortcut "
+                                     + "\(Settings.description(of: binding.shortcut))")
+            }
+            nextItemID += 1
+        }
+        if registered > 0 {
+            Log.controller.log("registered \(registered) item shortcut(s)")
+        }
+    }
+
+    /// Takes every shortcut down for as long as one is being recorded.
+    ///
+    /// Without this a combination that is already bound never reaches the
+    /// recorder at all: Carbon gets the keystroke first and fires whatever owns
+    /// it, so pressing the shortcut you are trying to reassign silently runs it
+    /// instead. Measured -- pressing ⌥⌘R over the recorder opened the panel
+    /// ⌥⌘R was already bound to, and the recorder just sat there waiting.
+    func suspendForRecording() {
+        guard !suspended else { return }
+        suspended = true
+        for (id, registration) in registrations {
+            if let reference = registration.reference { UnregisterEventHotKey(reference) }
+            registrations[id]?.reference = nil
+        }
+    }
+
+    func resumeAfterRecording() {
+        guard suspended else { return }
+        suspended = false
+        for (id, registration) in registrations where registration.reference == nil {
+            registrations[id]?.reference = carbonRegister(registration.shortcut, id: id)
+        }
+    }
+
+    /// Whether a combination is already taken by one of ours, so Settings can
+    /// refuse a duplicate rather than register a shortcut that never fires.
+    func isTaken(_ shortcut: Settings.Shortcut, excluding target: MenuBarItemTarget?) -> Bool {
+        if Settings.hotkey == shortcut { return true }
+        return Settings.itemShortcuts.contains { $0.key != target && $0.value == shortcut }
+    }
+
+    private func register(_ shortcut: Settings.Shortcut, id: UInt32,
+                          action: @escaping () -> Void) -> Bool {
+        // While recording, remember the binding but leave the keys free: the
+        // recorder needs to see them. resumeAfterRecording puts them back.
+        guard !suspended else {
+            registrations[id] = Registration(shortcut: shortcut, action: action, reference: nil)
+            return true
+        }
+        guard let reference = carbonRegister(shortcut, id: id) else { return false }
+        registrations[id] = Registration(shortcut: shortcut, action: action, reference: reference)
+        return true
+    }
+
+    private func carbonRegister(_ shortcut: Settings.Shortcut, id: UInt32) -> EventHotKeyRef? {
+        installHandlerIfNeeded()
+        var reference: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: OSType(Self.toggleID), id: id)
+        let status = RegisterEventHotKey(UInt32(shortcut.keyCode),
+                                         UInt32(shortcut.carbonModifiers),
+                                         hotKeyID, GetApplicationEventTarget(), 0, &reference)
+        return status == noErr ? reference : nil
+    }
+
+    private func unregister(id: UInt32) {
+        guard let registration = registrations.removeValue(forKey: id) else { return }
+        UnregisterEventHotKey(registration.reference)
+    }
+
+    private func installHandlerIfNeeded() {
+        guard handler == nil else { return }
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                       eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
@@ -38,35 +151,11 @@ final class GlobalHotkey {
             GetEventParameter(event, EventParamName(kEventParamDirectObject),
                               EventParamType(typeEventHotKeyID), nil,
                               MemoryLayout<EventHotKeyID>.size, nil, &pressed)
-            guard pressed.id == GlobalHotkey.identifier else { return noErr }
             let hotkey = Unmanaged<GlobalHotkey>.fromOpaque(context).takeUnretainedValue()
-            DispatchQueue.main.async { hotkey.onPress?() }
+            guard let action = hotkey.registrations[pressed.id]?.action else { return noErr }
+            DispatchQueue.main.async { action() }
             return noErr
         }, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &handler)
-
-        let hotKeyID = EventHotKeyID(signature: OSType(Self.identifier), id: Self.identifier)
-        let status = RegisterEventHotKey(UInt32(shortcut.keyCode),
-                                         UInt32(shortcut.carbonModifiers),
-                                         hotKeyID, GetApplicationEventTarget(), 0, &reference)
-        if status == noErr {
-            Log.controller.log("registered shortcut \(Settings.hotkeyDescription)")
-        } else {
-            // Most often because another app already owns the combination.
-            Log.controller.error("could not register shortcut \(Settings.hotkeyDescription) (status \(status))")
-            reference = nil
-        }
-        _ = hotKeyID
-    }
-
-    private func unregister() {
-        if let reference = reference {
-            UnregisterEventHotKey(reference)
-            self.reference = nil
-        }
-        if let handler = handler {
-            RemoveEventHandler(handler)
-            self.handler = nil
-        }
     }
 }
 
@@ -145,14 +234,7 @@ extension Settings {
 
     /// The shortcut as a user would read it, e.g. "⌥⌘H".
     static var hotkeyDescription: String {
-        guard let shortcut = hotkey else { return "None" }
-        let flags = NSEvent.ModifierFlags(rawValue: shortcut.modifierFlags)
-        var text = ""
-        if flags.contains(.control) { text += "\u{2303}" }
-        if flags.contains(.option) { text += "\u{2325}" }
-        if flags.contains(.shift) { text += "\u{21E7}" }
-        if flags.contains(.command) { text += "\u{2318}" }
-        return text + (KeyNames.name(for: shortcut.keyCode) ?? "?")
+        hotkey.map { description(of: $0) } ?? "None"
     }
 
     /// Whether to reveal when the pointer rests in the menu bar.
@@ -160,6 +242,30 @@ extension Settings {
         get { UserDefaults.standard.bool(forKey: "hoverToReveal") }
         set {
             UserDefaults.standard.set(newValue, forKey: "hoverToReveal")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// Whether the "Good to know" notes are open. Closed by default: they are
+    /// reference material, read once, and in one column they are the biggest
+    /// thing in the window.
+    static var showsGoodToKnow: Bool {
+        get { UserDefaults.standard.bool(forKey: "showGoodToKnow") }
+        set { UserDefaults.standard.set(newValue, forKey: "showGoodToKnow") }
+    }
+
+    /// Whether clicking the clock should briefly lift concealment so that
+    /// Notification Centre opens, and put it back when the panel closes.
+    ///
+    /// Off by default: anyone who reaches Notification Centre by swiping wants
+    /// nothing to do with it, and anyone who clicks the clock wants it badly.
+    /// Driven by the click rather than by hovering -- hover was the first
+    /// attempt and brought the icons back every time the pointer crossed the
+    /// top right corner, which is constantly.
+    static var clockClickThrough: Bool {
+        get { UserDefaults.standard.bool(forKey: "clockClickThrough") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "clockClickThrough")
             NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
         }
     }
