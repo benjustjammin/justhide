@@ -15,7 +15,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="${1:-$ROOT/build/JustHide.app}"
-IDENTITY="${JUSTHIDE_IDENTITY:-JustHide Dev}"
+# Which identity to sign with, best first. TCC keys the Accessibility grant on
+# the signature, so a STABLE identity is what stops every rebuild losing the
+# permission -- an ad-hoc signature is different every time.
+#
+# A real Developer ID beats the self-signed "JustHide Dev" this used to look for:
+# it is stable in exactly the same way, and it is the identity a release needs
+# anyway, so there is no reason to keep a second one around.
+if [ -n "${JUSTHIDE_IDENTITY:-}" ]; then
+    IDENTITY="$JUSTHIDE_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application"; then
+    IDENTITY="Developer ID Application"
+else
+    IDENTITY="JustHide Dev"
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
