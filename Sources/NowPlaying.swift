@@ -2,7 +2,7 @@
 //  NowPlaying.swift
 //  JustHide
 //
-//  JustHide's own Now Playing item, for Music and Spotify.
+//  JustHide's own Now Playing item, for Music.
 //
 //  Why it exists: while any concealment assertion is held, macOS hides its own
 //  Now Playing icon -- fixed policy for every unentitled caller, measured
@@ -27,13 +27,13 @@ extension Notification.Name {
 }
 
 enum Player: String, CaseIterable {
+    // Only Music. Spotify announces itself the same way and could be added
+    // here, but it was never tested, so it is not offered.
     case music
-    case spotify
 
     var bundleID: String {
         switch self {
         case .music: return "com.apple.Music"
-        case .spotify: return "com.spotify.client"
         }
     }
 
@@ -42,7 +42,6 @@ enum Player: String, CaseIterable {
     var notification: Notification.Name {
         switch self {
         case .music: return Notification.Name("com.apple.Music.playerInfo")
-        case .spotify: return Notification.Name("com.spotify.client.PlaybackStateChanged")
         }
     }
 
@@ -50,7 +49,6 @@ enum Player: String, CaseIterable {
     var appName: String {
         switch self {
         case .music: return "Music"
-        case .spotify: return "Spotify"
         }
     }
 
@@ -68,9 +66,8 @@ struct Track: Equatable {
     /// Seconds, when the player said.
     let duration: TimeInterval?
 
-    /// Both players send "Name", "Artist", "Album" and "Player State"; the
-    /// length is "Total Time" from Music and "Duration" from Spotify, both in
-    /// milliseconds.
+    /// Music sends "Name", "Artist", "Album", "Player State" and "Total Time",
+    /// the length in milliseconds.
     init?(player: Player, info: [AnyHashable: Any]) {
         guard let state = info["Player State"] as? String, state != "Stopped",
               let name = info["Name"] as? String else { return nil }
@@ -79,7 +76,7 @@ struct Track: Equatable {
         artist = info["Artist"] as? String ?? ""
         album = info["Album"] as? String ?? ""
         isPlaying = state == "Playing"
-        let ms = (info["Total Time"] ?? info["Duration"]) as? NSNumber
+        let ms = info["Total Time"] as? NSNumber
         duration = ms.map { $0.doubleValue / 1000 }.flatMap { $0 > 0 ? $0 : nil }
     }
 
@@ -100,8 +97,7 @@ final class NowPlayingMonitor {
 
     private(set) var current: Track?
     /// Whether the current song is a favourite, or nil where the player has
-    /// no such thing that a script can reach -- Spotify's AppleScript cannot
-    /// like or save a song, so its heart is simply not offered.
+    /// no such thing that a script can reach, so the heart is not offered.
     private(set) var favourite: Bool?
     private var isRunning = false
     private var observers: [NSObjectProtocol] = []
@@ -145,8 +141,8 @@ final class NowPlayingMonitor {
     }
 
     /// A player that starts playing takes over; a pause or a stop only counts
-    /// from the player that is current, so pausing Spotify does not hide what
-    /// Music is playing.
+    /// from the player that is current, so pausing one player does not hide
+    /// what another is playing. (One player today, but the rule costs nothing.)
     private func received(_ track: Track?, from player: Player) {
         if let track = track {
             if current == nil || current?.player == player || track.isPlaying { update(track) }
@@ -206,9 +202,8 @@ enum PlayerControl {
             end tell
             """
         guard let list = run(script, player: player), list.numberOfItems >= 5 else { return nil }
-        // Music reports duration in seconds, Spotify in milliseconds.
-        let rawDuration = list.atIndex(5)?.doubleValue ?? 0
-        let duration = player == .spotify ? rawDuration / 1000 : rawDuration
+        // Music reports the duration here in seconds.
+        let duration = list.atIndex(5)?.doubleValue ?? 0
         return Track(player: player,
                      name: list.atIndex(1)?.stringValue ?? "",
                      artist: list.atIndex(2)?.stringValue ?? "",
@@ -232,23 +227,11 @@ enum PlayerControl {
                    player: player) != nil
     }
 
-    /// The artwork, handed back on the main queue. Music gives the image data
-    /// itself; Spotify gives a URL, fetched here.
+    /// The artwork. Music hands over the image data itself.
     static func artwork(of player: Player, completion: @escaping (NSImage?) -> Void) {
-        switch player {
-        case .music:
-            let data = run("tell application \"Music\" to get raw data of artwork 1 of current track",
-                           player: player)?.data
-            completion(data.flatMap(NSImage.init(data:)))
-        case .spotify:
-            guard let link = run("tell application \"Spotify\" to artwork url of current track",
-                                 player: player)?.stringValue,
-                  let url = URL(string: link) else { return completion(nil) }
-            URLSession.shared.dataTask(with: url) { data, _, _ in
-                let image = data.flatMap(NSImage.init(data:))
-                DispatchQueue.main.async { completion(image) }
-            }.resume()
-        }
+        let data = run("tell application \"\(player.appName)\" to get raw data of artwork 1 of current track",
+                       player: player)?.data
+        completion(data.flatMap(NSImage.init(data:)))
     }
 
     /// Never sent to a player that is not running: an Apple event would

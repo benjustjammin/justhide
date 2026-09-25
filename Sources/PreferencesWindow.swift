@@ -391,14 +391,13 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // ---- Now Playing. Its own section: it is a feature of its own rather
         // than a way of hiding, and it has three settings of its own.
         let nowPlayingLabel = label("Now Playing", bold: true)
-        let nowPlayingCheckbox = NSButton(checkboxWithTitle: "Show Now Playing for Music and Spotify",
+        let nowPlayingCheckbox = NSButton(checkboxWithTitle: "Show Now Playing for Music",
                                           target: self, action: #selector(toggleNowPlaying))
         nowPlayingCheckbox.translatesAutoresizingMaskIntoConstraints = false
         self.nowPlayingCheckbox = nowPlayingCheckbox
         let nowPlayingNote = label("Unlike Apple\u{2019}s, it stays while icons are hidden. Click it for "
                                    + "the player; with the song showing, the heart at the end favourites "
-                                   + "it in Music (Spotify\u{2019}s scripting has no favourites). The "
-                                   + "controls ask once for permission to control each player.",
+                                   + "it. The controls ask once for permission to control Music.",
                                    secondary: true)
         nowPlayingNote.maximumNumberOfLines = 0
 
