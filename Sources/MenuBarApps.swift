@@ -111,8 +111,35 @@ enum MenuBarApps {
     /// them counts as new later. Run when "hide new apps" is switched on and
     /// at each launch, because `known` is otherwise only fed by the picker.
     static func rememberCurrentOwners() {
+        remember(everPlaced())
         guard AXIsProcessTrusted() else { return }
         remember(owners())
+    }
+
+    /// Every app macOS has ever placed an icon for, from its own layout table
+    /// -- the file it keeps so each icon returns to its slot, and which Thaw
+    /// and Bartender write to when they rearrange. Read only, never written.
+    /// Without it an app that happened to be closed when "hide new apps" was
+    /// switched on looked new at its next launch (CleanShot X, 2026-09-25).
+    /// Entries read `status:<bundle>::<autosave>`; Apple's own are
+    /// `module:<name>` and are skipped. Anything unreadable just means fewer
+    /// apps count as known, which only ever errs towards not hiding.
+    private static func everPlaced() -> Set<String> {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Group Containers/com.apple.MenuBar/Library/Preferences/com.apple.MenuBar.plist")
+        guard let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let positions = plist["TrailingItemPreferredPositions"] as? [String: Any] else {
+            Log.controller.log("could not read macOS's menu bar layout table")
+            return []
+        }
+        let bundles = Set(positions.keys.compactMap { key -> String? in
+            guard key.hasPrefix("status:"),
+                  let end = key.range(of: "::") else { return nil }
+            return String(key[key.index(key.startIndex, offsetBy: 7)..<end.lowerBound])
+        })
+        Log.controller.log("macOS's menu bar layout table lists \(bundles.count) app(s) with icons")
+        return bundles
     }
 
     /// An app that has never had an icon in the bar as far as JustHide knows,
