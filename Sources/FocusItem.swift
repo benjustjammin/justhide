@@ -299,36 +299,127 @@ final class FocusItem: NSObject {
     /// through Control Centre, which works while concealed: one consistent
     /// oddity (Control Centre shows first, then its Focus modes) rather than
     /// several that depend on settings. Ben's call, 2026-09-25.
+    ///
+    /// The route, taken from how Pelmet does it (ControlCenterFocus in its
+    /// FocusStatus.swift) after 1.5 shipped a version that failed on real
+    /// clicks: press Control Centre's menu extra, wait for the panel to build,
+    /// and switch it to Focus with the tile's "show details" action. What
+    /// broke: a real click on our item also DISMISSES any Control Centre panel,
+    /// as a click anywhere outside one does, so pressing Control Centre while
+    /// the click was still going on opened a panel that the same click then
+    /// closed -- the tile was never found. The probe that proved the route
+    /// ran from Terminal with no click, which is why it passed. So the press
+    /// waits for the mouse to be up and any panel to be gone.
     @objc private func clicked() {
         guard AXIsProcessTrusted() else {
             NSSound.beep()
             Log.controller.error("Focus: opening the Focus modes needs Accessibility")
             return
         }
-        Self.openThroughControlCentre()
-    }
-
-    /// Control Centre, then its Focus module once its window exists.
-    static func openThroughControlCentre() {
-        guard let controlCentre = menuExtra("com.apple.menuextra.controlcenter") else { return }
-        AXUIElementPerformAction(controlCentre, kAXPressAction as CFString)
-        pressFocusModule(attempt: 0)
-    }
-
-    private static func pressFocusModule(attempt: Int) {
-        // Up to three seconds: Control Centre was measured to take 0.8s, but a
-        // 1.2s limit still missed once on a busy machine.
-        guard attempt < 20 else {
-            Log.controller.error("Focus: Control Centre opened but its Focus module was not found")
+        // Open already, and this click has just dismissed it: pressing now
+        // would bring it straight back, so a second click closes, as Apple's
+        // own icon does.
+        if panelIsOurs {
+            panelIsOurs = false
+            panelWatch?.invalidate()
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            if let module = controlCentreElement(identifier: "module-FocusModes") {
-                AXUIElementPerformAction(module, kAXPressAction as CFString)
-            } else {
-                pressFocusModule(attempt: attempt + 1)
+        openWhenClear(step: 0)
+    }
+
+    /// Set while the Control Centre panel on screen is one we opened.
+    private var panelIsOurs = false
+    private var panelWatch: Timer?
+
+    /// Waits (briefly) for the click to end and a dismissed panel to finish
+    /// going, then presses Control Centre.
+    private func openWhenClear(step: Int) {
+        if step < 30, NSEvent.pressedMouseButtons != 0 || Self.controlCentrePanel() != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+                self?.openWhenClear(step: step + 1)
+            }
+            return
+        }
+        guard let controlCentre = Self.menuExtra("com.apple.menuextra.controlcenter") else {
+            Log.controller.error("Focus: Control Centre's menu bar item was not found")
+            return
+        }
+        AXUIElementPerformAction(controlCentre, kAXPressAction as CFString)
+        showFocusModes(attempt: 0)
+    }
+
+    /// The panel takes a few frames to build and the tile arrives with it;
+    /// looked for every 20ms for up to two seconds.
+    private func showFocusModes(attempt: Int) {
+        guard attempt < 100 else {
+            Log.controller.error("Focus: Control Centre opened but its Focus tile never appeared")
+            return
+        }
+        if let panel = Self.controlCentrePanel(),
+           let tile = Self.find("module-FocusModes", in: panel, depth: 8) {
+            Self.showDetails(of: tile)
+            panelIsOurs = true
+            watchPanel()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+            self?.showFocusModes(attempt: attempt + 1)
+        }
+    }
+
+    /// The tile's own "show details" action, on the checkbox inside it,
+    /// which swaps the panel to the Focus modes. A plain press on that
+    /// checkbox toggles Do Not Disturb instead, so it is never pressed; the
+    /// tile group is pressed only if the action is missing, which is what the
+    /// first version did and what the Terminal probe showed opening the modes.
+    private static func showDetails(of tile: AXUIElement) {
+        if let box = findRole(kAXCheckBoxRole, in: tile, depth: 2) {
+            var names: CFArray?
+            AXUIElementCopyActionNames(box, &names)
+            if let details = (names as? [String] ?? []).first(where: { $0.hasPrefix("Name:show details") }) {
+                AXUIElementPerformAction(box, details as CFString)
+                return
             }
         }
+        Log.controller.log("Focus: the Focus tile has no details action; pressing the tile")
+        AXUIElementPerformAction(tile, kAXPressAction as CFString)
+    }
+
+    /// Clears `panelIsOurs` once the panel goes: a mode was picked, or the
+    /// user clicked away. Five looks a second, and only while it is up.
+    private func watchPanel() {
+        panelWatch?.invalidate()
+        var looks = 0
+        panelWatch = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
+            looks += 1
+            guard Self.controlCentrePanel() == nil || looks > 300 else { return }
+            self?.panelIsOurs = false
+            timer.invalidate()
+        }
+    }
+
+    /// Control Centre's panel window, nil while none is up.
+    private static func controlCentrePanel() -> AXUIElement? {
+        guard let cc = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.controlcenter").first else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(cc.processIdentifier),
+                                            kAXWindowsAttribute as CFString, &value) == .success
+        else { return nil }
+        return (value as? [AXUIElement])?.first
+    }
+
+    private static func findRole(_ role: String, in element: AXUIElement, depth: Int) -> AXUIElement? {
+        var value: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) == .success,
+           value as? String == role { return element }
+        guard depth > 0,
+              AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value) == .success,
+              let children = value as? [AXUIElement] else { return nil }
+        for child in children {
+            if let found = findRole(role, in: child, depth: depth - 1) { return found }
+        }
+        return nil
     }
 
     private static func menuExtra(_ identifier: String) -> AXUIElement? {
@@ -339,21 +430,6 @@ final class FocusItem: NSObject {
                                             "AXExtrasMenuBar" as CFString, &value) == .success,
               let bar = value else { return nil }
         return find(identifier, in: bar as! AXUIElement, depth: 3)
-    }
-
-    private static func controlCentreElement(identifier: String) -> AXUIElement? {
-        guard let cc = NSRunningApplication.runningApplications(
-            withBundleIdentifier: "com.apple.controlcenter").first else { return nil }
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(cc.processIdentifier),
-                                            kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return nil }
-        for window in windows {
-            // Deep, and only as deep as Control Centre's window goes: the probe
-            // that proved this route walked the whole tree.
-            if let found = find(identifier, in: window, depth: 16) { return found }
-        }
-        return nil
     }
 
     private static func find(_ identifier: String, in element: AXUIElement, depth: Int) -> AXUIElement? {
