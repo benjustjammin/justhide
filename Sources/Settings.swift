@@ -162,8 +162,8 @@ enum Settings {
         case always
     }
 
-    /// JustHide's own Focus item (see FocusItem.swift). Off by default: it
-    /// needs Full Disk Access.
+    /// JustHide's own Focus item (see FocusItem.swift). Off by default, like
+    /// Now Playing: it adds an icon.
     static var showsFocus: Bool {
         get { defaults.bool(forKey: "showsFocus") }
         set {

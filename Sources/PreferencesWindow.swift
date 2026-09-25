@@ -437,8 +437,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         nowPlayingAppleButton.translatesAutoresizingMaskIntoConstraints = false
 
         // ---- Focus. Built like Now Playing, with one status line and one
-        // button that say whichever thing matters most: missing Full Disk
-        // Access first, then whether Apple's own is still on.
+        // button saying whether Apple's own is still on.
         let focusLabel = label("Focus", bold: true)
         let focusCheckbox = NSButton(checkboxWithTitle: "Show the current Focus",
                                      target: self, action: #selector(toggleFocus))
@@ -447,9 +446,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         let focusNote = label("Unlike Apple\u{2019}s, it stays while icons are hidden, with each "
                               + "Focus\u{2019}s own symbol. Click it for the Focus modes \u{2014} "
                               + "macOS only lets another app reach them through Control Centre, so "
-                              + "Control Centre opens first and then switches to them. Needs Full "
-                              + "Disk Access, to read which Focus is on, and Accessibility, to open "
-                              + "the modes.", secondary: true)
+                              + "Control Centre opens first and then switches to them. Opening "
+                              + "them needs Accessibility.", secondary: true)
         focusNote.maximumNumberOfLines = 0
 
         let focusWhenLabel = label("Show it:")
@@ -1207,20 +1205,13 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             : "Apple\u{2019}s own Now Playing is switched off, so this is the only one."
     }
 
-    /// Missing access outranks everything, because without it the item shows
-    /// nothing at all; then the two-icons note, as for Now Playing.
+    /// The two-icons note, as for Now Playing.
     private func applyFocusState() {
         let on = Settings.showsFocus
         focusCheckbox?.state = on ? .on : .off
         focusWhenPopUp?.isEnabled = on
         focusWhenPopUp?.selectItem(at: Settings.focusAppearance == .whileOn ? 0 : 1)
-        let readable = FocusStore.read() != .unreadable
-        focusStatusNote?.textColor = on && !readable ? .systemOrange : .secondaryLabelColor
-        if !readable {
-            focusStatusNote?.stringValue = "JustHide does not have Full Disk Access yet, so it cannot "
-                + "read which Focus is on" + (on ? " and the Focus icon stays away." : ".")
-            focusStatusButton?.title = "Open Full Disk Access\u{2026}"
-        } else if Settings.appleFocusIsOn {
+        if Settings.appleFocusIsOn {
             focusStatusNote?.stringValue = "Apple\u{2019}s own Focus icon is also switched on, so you "
                 + "will see both while icons are revealed. Set Focus to \u{201C}Don\u{2019}t "
                 + "Show\u{201D} under Menu Bar in System Settings to keep only this one."
@@ -1244,11 +1235,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     }
 
     @objc private func focusStatusAction() {
-        if FocusStore.read() == .unreadable {
-            FocusStore.openFullDiskAccess()
-        } else {
-            openMenuBarSettings()
-        }
+        openMenuBarSettings()
     }
 
     @objc private func toggleNowPlaying() {
