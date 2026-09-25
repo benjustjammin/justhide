@@ -240,7 +240,9 @@ final class FocusItem: NSObject {
     }
 
     private static func pressFocusModule(attempt: Int) {
-        guard attempt < 8 else {
+        // Up to three seconds: Control Centre was measured to take 0.8s, but a
+        // 1.2s limit still missed once on a busy machine.
+        guard attempt < 20 else {
             Log.controller.error("Focus: Control Centre opened but its Focus module was not found")
             return
         }
@@ -271,7 +273,9 @@ final class FocusItem: NSObject {
                                             kAXWindowsAttribute as CFString, &value) == .success,
               let windows = value as? [AXUIElement] else { return nil }
         for window in windows {
-            if let found = find(identifier, in: window, depth: 8) { return found }
+            // Deep, and only as deep as Control Centre's window goes: the probe
+            // that proved this route walked the whole tree.
+            if let found = find(identifier, in: window, depth: 16) { return found }
         }
         return nil
     }
