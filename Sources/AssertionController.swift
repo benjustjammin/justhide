@@ -595,7 +595,15 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         quit.attributedTitle = JustHide.menuTitle("Quit JustHide", symbol: "door.left.hand.open")
         menu.addItem(quit)
 
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 5), in: button)
+        // Handed to the status item for the length of one click, so macOS
+        // places it under the item itself. popUp(positioning:at:in:) computed
+        // the spot from the button's coordinates, and on macOS 27 those do not
+        // map onto where a status item is drawn (the same reason a click's
+        // locationInWindow cannot be used): the menu came up cut off at the
+        // bottom.
+        chevron.menu = menu
+        button.performClick(nil)
+        chevron.menu = nil
     }
 
     @objc private func openSettings() {
