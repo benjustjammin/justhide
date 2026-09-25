@@ -8,7 +8,7 @@
 Pick the apps whose icons you don't need all the time. They disappear.
 Click the chevron to bring them back.
 
-<img src="docs/settings.png" width="520" alt="JustHide settings">
+<img src="docs/settings.png" width="760" alt="JustHide settings">
 </div>
 
 ---
@@ -23,19 +23,25 @@ JustHide doesn't fight that. It uses the concealment facility macOS 27 has built
 hiding is instant, nothing slides around, and the menu bar's layout is never touched.
 
 It does one job. There is no floating bar, no icon previews, no groups, no profiles.
+The two extras it does have are there to put back what hiding costs: while anything is
+hidden, macOS hides its own **Now Playing** and **Focus** icons too, so JustHide can
+show its own.
 
 ## Requirements
 
 - macOS 27 (Golden Gate) or later
 - No Screen Recording, no Developer ID, no sandbox exceptions
 - Accessibility is **optional**, and never asked for at launch.[^ax]
+- The optional Now Playing item asks once for permission to control Music, the first
+  time you use its controls. The Focus item needs nothing extra.
 
-[^ax]: Hiding needs no permission at all. Accessibility buys four things: listing
+[^ax]: Hiding needs no permission at all. Accessibility buys six things: listing
 which apps have menu bar icons right now, so the picker can show them; checking
 whether a newly launched app actually put an icon up before the allowlist is
-refreshed; per-icon keyboard shortcuts; and letting the clock through. The first two
+refreshed; per-icon keyboard shortcuts; letting the clock through; hiding new apps
+automatically; and opening the Focus modes from JustHide's Focus icon. The first two
 degrade quietly — you add apps from the same picker or with **Other App…** — but the
-last two do nothing without it, so Settings shows a notice when one of them is on and
+others do nothing without it, so Settings shows a notice when one of them is on and
 the permission is missing. The picker's **Allow…** button is the ask, and its **↻**
 re-reads the answer.
 
@@ -101,6 +107,35 @@ with a single icon needs no name. This one needs Accessibility.
 JustHide never moves anything. Where each icon sits is macOS's business (see below),
 so ⌘-drag them into the order you want and macOS will remember it.
 
+**Hide new menu bar apps automatically** (Behaviour, off by default) hides an app the
+first time it puts an icon in the bar and adds it to the list, where unticking
+**Hidden** keeps it visible for good. Apps already in your bar, or already in the list,
+never count as new; Apple's own never do. Needs Accessibility, to see the icon.
+
+### Now Playing, Focus and Time Machine
+
+All three are off until you switch them on, in the right-hand column of Settings.
+Now Playing and Focus stay in the bar while your other icons are hidden — which
+Apple's own do not — and Time Machine can finally hide with them.
+
+- **Now Playing** follows Music. In the bar it is either an icon (a waveform while
+  playing, a circled pause while paused) or the icon, the song and a heart; a long
+  title scrolls rather than pushing the bar about, and the heart favourites the song.
+  Click it for a small player: artwork, progress, previous / play-pause / next and the
+  heart. Show it always, or only while a song is playing or paused.
+- **Focus** shows the current Focus with that Focus's own symbol, your own Focuses
+  included, and follows changes within a couple of seconds. Show it only while a Focus
+  is on, or always. Click it for the Focus modes (see Good to know).
+- **Time Machine** replaces Apple's icon, which macOS will not hide: switching it on
+  switches Apple's off (and switching it off puts Apple's back), and JustHide's shows
+  only while your icons are shown, or always if you prefer. Its menu has the backup
+  status, Back Up Now, Browse Time Machine Backups and Time Machine Settings.
+
+Set Apple's own Now Playing and Focus to **Don't Show** under **Menu Bar** in System
+Settings, or you will see two of each while your icons are revealed. Settings tells you
+whether they are still on and has a button to the right page; JustHide does not change
+that setting for you.
+
 ## Good to know
 
 Honest list of the things that will surprise you, all of them consequences of how
@@ -120,6 +155,10 @@ macOS 27 works rather than choices:
   it. That costs a brief flash of your hidden icons, and needs Accessibility. Left
   off, swipe in from the right edge or reveal first. Wi-Fi and Control Centre are
   unaffected either way.
+- **JustHide's Focus opens the modes through Control Centre**, so Control Centre
+  shows first and then switches to them. Apple's own dropdown only opens from Apple's
+  own icon, which is gone while anything is hidden, and taking the hiding down to
+  reach it would flash every hidden icon. This is the one route that always works.
 - **This uses part of macOS that Apple doesn't document.** If an update breaks it,
   JustHide says so on its menu bar symbol and offers you the older layout-based
   method there and then — in the dialog, in the symbol's menu, and in Settings.
@@ -261,6 +300,10 @@ Sources/
   Settings.swift              what the user can change
   GlobalHotkey.swift          keyboard shortcuts (Carbon, needs no permission)
   MenuBarItemShortcuts.swift  pressing a hidden icon from the keyboard
+  NowPlaying.swift            what Music is playing, and its controls
+  NowPlayingItem.swift        the Now Playing item and its player
+  FocusItem.swift             the Focus item, read from donotdisturbd's log lines
+  TimeMachineItem.swift       the Time Machine item, and switching Apple's off
   MenuBarApps.swift           which apps own menu bar icons
   AXMenuBarItems.swift        reading the bar through Accessibility
   LaunchAtLogin.swift         SMAppService
@@ -272,6 +315,8 @@ Sources/
   SpacerPlacement.swift       spacer placement for the fallback
   ItemMover.swift             synthetic cmd-drag (diagnostics only; see below)
   MenuBarItems.swift          the old window-list route, kept as evidence
+Resources/JustHide.entitlements
+                              Apple Events, for Now Playing's controls
 tools/make-icon.swift         draws the app icon
 build.sh                      compiles and assembles the bundle
 ```
