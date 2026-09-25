@@ -20,6 +20,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var clockCheckbox: NSButton?
     private var clockNote: NSTextField?
     private var glyphPopUp: NSPopUpButton?
+    private var nowPlayingCheckbox: NSButton?
+    private var nowPlayingStylePopUp: NSPopUpButton?
+    private var nowPlayingWhenPopUp: NSPopUpButton?
+    private var nowPlayingAppleNote: NSTextField?
     private var autoHidePopUp: NSPopUpButton?
     private var shortcutButton: NSButton?
     private var shortcutClear: NSButton?
@@ -380,6 +384,55 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         glyphPopUp.translatesAutoresizingMaskIntoConstraints = false
         self.glyphPopUp = glyphPopUp
 
+        // ---- Now Playing. Its own section: it is a feature of its own rather
+        // than a way of hiding, and it has three settings of its own.
+        let nowPlayingLabel = label("Now Playing", bold: true)
+        let nowPlayingCheckbox = NSButton(checkboxWithTitle: "Show Now Playing for Music and Spotify",
+                                          target: self, action: #selector(toggleNowPlaying))
+        nowPlayingCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        self.nowPlayingCheckbox = nowPlayingCheckbox
+        let nowPlayingNote = label("Unlike Apple\u{2019}s, it stays while icons are hidden. Click it for "
+                                   + "the player; with the song showing, the heart at the end favourites "
+                                   + "it in Music (Spotify\u{2019}s scripting has no favourites). The "
+                                   + "controls ask once for permission to control each player.",
+                                   secondary: true)
+        nowPlayingNote.maximumNumberOfLines = 0
+
+        let nowPlayingStyleLabel = label("In the menu bar:")
+        let nowPlayingStylePopUp = NSPopUpButton()
+        for (title, style) in [("Icon", Settings.NowPlayingStyle.icon),
+                               ("Icon and song", Settings.NowPlayingStyle.title)] {
+            nowPlayingStylePopUp.addItem(withTitle: title)
+            nowPlayingStylePopUp.lastItem?.representedObject = style.rawValue
+        }
+        nowPlayingStylePopUp.target = self
+        nowPlayingStylePopUp.action = #selector(changeNowPlayingStyle)
+        nowPlayingStylePopUp.translatesAutoresizingMaskIntoConstraints = false
+        self.nowPlayingStylePopUp = nowPlayingStylePopUp
+
+        let nowPlayingWhenLabel = label("Show it:")
+        let nowPlayingWhenPopUp = NSPopUpButton()
+        for (title, when) in [("While a song is playing or paused", Settings.NowPlayingAppearance.whilePlaying),
+                              ("Always", Settings.NowPlayingAppearance.always)] {
+            nowPlayingWhenPopUp.addItem(withTitle: title)
+            nowPlayingWhenPopUp.lastItem?.representedObject = when.rawValue
+        }
+        nowPlayingWhenPopUp.target = self
+        nowPlayingWhenPopUp.action = #selector(changeNowPlayingWhen)
+        nowPlayingWhenPopUp.translatesAutoresizingMaskIntoConstraints = false
+        self.nowPlayingWhenPopUp = nowPlayingWhenPopUp
+
+        // Apple's own is the user's setting, so this says how it is and opens
+        // the page rather than changing it (see Settings.appleNowPlayingIsOn).
+        let nowPlayingAppleNote = label("", secondary: true)
+        nowPlayingAppleNote.maximumNumberOfLines = 0
+        self.nowPlayingAppleNote = nowPlayingAppleNote
+        let nowPlayingAppleButton = NSButton(title: "Open Menu Bar Settings\u{2026}", target: self,
+                                             action: #selector(openMenuBarSettings))
+        nowPlayingAppleButton.bezelStyle = .rounded
+        nowPlayingAppleButton.controlSize = .small
+        nowPlayingAppleButton.translatesAutoresizingMaskIntoConstraints = false
+
         // ---- Quirks, behind a disclosure. In one column this block is the
         // single biggest thing in the window, and it is reference material: read
         // once, then in the way. Collapsed by default, and the state sticks.
@@ -424,6 +477,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                      loginCheckbox, hoverCheckbox, clockCheckbox, clockNote,
                      updatesCheckbox, autoHideLabel, autoHidePopUp,
                      shortcutLabel, shortcutButton, shortcutClear, glyphLabel, glyphPopUp,
+                     nowPlayingLabel, nowPlayingCheckbox, nowPlayingNote,
+                     nowPlayingStyleLabel, nowPlayingStylePopUp, nowPlayingWhenLabel,
+                     nowPlayingWhenPopUp, nowPlayingAppleNote, nowPlayingAppleButton,
                      quirksLabel, quirksBox] {
             content.addSubview(view)
         }
@@ -441,6 +497,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         perAppNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 120
         clockNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
+        nowPlayingNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
+        nowPlayingAppleNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
         quirks.preferredMaxLayoutWidth = windowWidth - 2 * margin - 24
 
         NSLayoutConstraint.activate([
@@ -532,8 +590,37 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             glyphPopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
             glyphPopUp.widthAnchor.constraint(equalToConstant: 220),
 
+            // ---- Now Playing
+            nowPlayingLabel.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 18),
+            nowPlayingLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+
+            nowPlayingCheckbox.topAnchor.constraint(equalTo: nowPlayingLabel.bottomAnchor, constant: 8),
+            nowPlayingCheckbox.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
+
+            nowPlayingNote.topAnchor.constraint(equalTo: nowPlayingCheckbox.bottomAnchor, constant: 2),
+            nowPlayingNote.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 18),
+            nowPlayingNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+
+            nowPlayingStyleLabel.topAnchor.constraint(equalTo: nowPlayingNote.bottomAnchor, constant: 12),
+            nowPlayingStyleLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingStylePopUp.centerYAnchor.constraint(equalTo: nowPlayingStyleLabel.centerYAnchor),
+            nowPlayingStylePopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
+            nowPlayingStylePopUp.widthAnchor.constraint(equalToConstant: 220),
+
+            nowPlayingWhenLabel.topAnchor.constraint(equalTo: nowPlayingStyleLabel.bottomAnchor, constant: 14),
+            nowPlayingWhenLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingWhenPopUp.centerYAnchor.constraint(equalTo: nowPlayingWhenLabel.centerYAnchor),
+            nowPlayingWhenPopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
+            nowPlayingWhenPopUp.widthAnchor.constraint(equalToConstant: 260),
+
+            nowPlayingAppleNote.topAnchor.constraint(equalTo: nowPlayingWhenLabel.bottomAnchor, constant: 12),
+            nowPlayingAppleNote.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingAppleNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            nowPlayingAppleButton.topAnchor.constraint(equalTo: nowPlayingAppleNote.bottomAnchor, constant: 6),
+            nowPlayingAppleButton.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+
             // ---- The notes, behind their triangle
-            quirksToggle.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 18),
+            quirksToggle.topAnchor.constraint(equalTo: nowPlayingAppleButton.bottomAnchor, constant: 18),
             quirksToggle.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
             quirksLabel.centerYAnchor.constraint(equalTo: quirksToggle.centerYAnchor),
             quirksLabel.leadingAnchor.constraint(equalTo: quirksToggle.trailingAnchor, constant: 4),
@@ -685,6 +772,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         updatesCheckbox?.state = Settings.checksForUpdates ? .on : .off
 
         glyphPopUp?.selectItem(at: Settings.Glyph.allCases.firstIndex(of: Settings.glyph) ?? 0)
+        applyNowPlayingState()
         if let index = Self.autoHideOptions.firstIndex(where: { $0.seconds == Settings.autoHideDelay }) {
             autoHidePopUp?.selectItem(at: index)
         }
@@ -1000,6 +1088,45 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // The "Good to know" note about the dead clock is only true while this
         // is off, so rebuild it.
         reload()
+    }
+
+    private func applyNowPlayingState() {
+        let on = Settings.showsNowPlaying
+        nowPlayingCheckbox?.state = on ? .on : .off
+        nowPlayingStylePopUp?.isEnabled = on
+        nowPlayingWhenPopUp?.isEnabled = on
+        nowPlayingStylePopUp?.selectItem(at: Settings.nowPlayingStyle == .icon ? 0 : 1)
+        nowPlayingWhenPopUp?.selectItem(at: Settings.nowPlayingAppearance == .whilePlaying ? 0 : 1)
+        // Two players side by side is only possible while icons are revealed:
+        // while anything is hidden, macOS hides its own.
+        nowPlayingAppleNote?.stringValue = Settings.appleNowPlayingIsOn
+            ? "Apple\u{2019}s own Now Playing is also switched on, so you will see both while "
+              + "icons are revealed. Set Now Playing to \u{201C}Don\u{2019}t Show\u{201D} under Menu "
+              + "Bar in System Settings to keep only this one."
+            : "Apple\u{2019}s own Now Playing is switched off, so this is the only one."
+    }
+
+    @objc private func toggleNowPlaying() {
+        Settings.showsNowPlaying = nowPlayingCheckbox?.state == .on
+        reload()
+    }
+
+    @objc private func changeNowPlayingStyle() {
+        guard let raw = nowPlayingStylePopUp?.selectedItem?.representedObject as? String,
+              let style = Settings.NowPlayingStyle(rawValue: raw) else { return }
+        Settings.nowPlayingStyle = style
+    }
+
+    @objc private func changeNowPlayingWhen() {
+        guard let raw = nowPlayingWhenPopUp?.selectedItem?.representedObject as? String,
+              let when = Settings.NowPlayingAppearance(rawValue: raw) else { return }
+        Settings.nowPlayingAppearance = when
+    }
+
+    @objc private func openMenuBarSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func changeGlyph() {

@@ -72,7 +72,7 @@ echo "    identity: $IDENTITY"
 # hardened runtime and a secure timestamp, and build.sh asks for neither of
 # those when it is signing something you are only going to run locally.
 echo "==> Signing for distribution"
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+codesign --force --options runtime --timestamp --entitlements "$ROOT/Resources/JustHide.entitlements" --sign "$IDENTITY" "$APP"
 codesign --verify --strict --verbose=2 "$APP"
 
 # Printed because it is the thing that matters for updates: identity-based, not

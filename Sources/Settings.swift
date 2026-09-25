@@ -101,6 +101,60 @@ enum Settings {
         }
     }
 
+    // MARK: - Now Playing
+
+    enum NowPlayingStyle: String {
+        case icon
+        case title
+    }
+
+    enum NowPlayingAppearance: String {
+        case always
+        case whilePlaying
+    }
+
+    /// JustHide's own Now Playing item (see NowPlaying.swift). Off by default:
+    /// it adds an icon, and it asks for Automation the first time it is used.
+    static var showsNowPlaying: Bool {
+        get { defaults.bool(forKey: "showsNowPlaying") }
+        set {
+            defaults.set(newValue, forKey: "showsNowPlaying")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// An icon alone, or the song beside it.
+    static var nowPlayingStyle: NowPlayingStyle {
+        get { defaults.string(forKey: "nowPlayingStyle").flatMap(NowPlayingStyle.init) ?? .icon }
+        set {
+            defaults.set(newValue.rawValue, forKey: "nowPlayingStyle")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// Always there, or only while a player has a song (playing or paused),
+    /// like Apple's "Show When Active".
+    static var nowPlayingAppearance: NowPlayingAppearance {
+        get {
+            defaults.string(forKey: "nowPlayingAppearance").flatMap(NowPlayingAppearance.init)
+                ?? .whilePlaying
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: "nowPlayingAppearance")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// Whether Apple's own Now Playing is set to appear. Read only: it is the
+    /// user's setting in System Settings \u{2192} Menu Bar, and a change written
+    /// from outside is not honoured anyway (measured with Allow in Menu Bar).
+    /// Stored per host by Control Center; 8 means "Don't Show".
+    static var appleNowPlayingIsOn: Bool {
+        let value = CFPreferencesCopyValue("NowPlaying" as CFString, "com.apple.controlcenter" as CFString,
+                                           kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)
+        return (value as? Int).map { $0 != 8 } ?? true
+    }
+
     // MARK: - Appearance
 
     /// The menu bar glyph.

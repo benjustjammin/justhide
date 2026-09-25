@@ -110,6 +110,24 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         applyShortcut()
         applyHoverMonitor()
 
+        // JustHide's own Now Playing item. It follows the players, and when it
+        // changes while icons are hidden the assertion is re-applied: a second
+        // display freezes our items while one is held, and a fresh assertion is
+        // the only thing that redraws them there. Coalesced with the allowlist
+        // refresh, and skipped on one display, where nothing is frozen.
+        NotificationCenter.default.addObserver(
+            forName: .justHideNowPlayingChanged, object: nil, queue: .main
+        ) { _ in NowPlayingItem.shared.apply() }
+        NotificationCenter.default.addObserver(
+            forName: .justHideOwnItemsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Not while stood down for Notification Centre: re-asserting
+            // would close the panel the user just opened.
+            guard let self = self, NSScreen.screens.count > 1, !self.suspendedForClock else { return }
+            self.scheduleAllowlistRefresh()
+        }
+        NowPlayingItem.shared.apply()
+
         // Opening or closing the lid, or plugging a display in, moves the menu
         // bar around, and the bar that appears draws our item from whatever it
         // last had -- which is how a glyph ends up disagreeing with the state on
@@ -312,6 +330,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func settingsChanged() {
+        NowPlayingItem.shared.apply()
         refreshGlyph()
         applyShortcut()
         applyHoverMonitor()

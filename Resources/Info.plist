@@ -24,6 +24,8 @@
 	<string>27.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>JustHide's Now Playing item uses this to play, pause and skip, and to show the artwork and where the song is up to.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>JustHide</string>
 </dict>

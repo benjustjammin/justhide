@@ -47,10 +47,10 @@ xcrun swiftc \
 
 echo "==> Signing"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
-    codesign --force --options runtime --sign "$IDENTITY" "$APP"
+    codesign --force --options runtime --entitlements "$ROOT/Resources/JustHide.entitlements" --sign "$IDENTITY" "$APP"
     echo "    signed with '$IDENTITY' (Accessibility grant persists across rebuilds)"
 else
-    codesign --force --sign - "$APP"
+    codesign --force --entitlements "$ROOT/Resources/JustHide.entitlements" --sign - "$APP"
     echo "    ad-hoc signed; no '$IDENTITY' identity found."
     echo "    macOS may re-ask for Accessibility after each rebuild."
 fi
