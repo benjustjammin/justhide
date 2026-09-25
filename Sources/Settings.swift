@@ -168,6 +168,36 @@ enum Settings {
         return (value as? Int).map { $0 != 8 } ?? true
     }
 
+    // MARK: - Time Machine
+
+    enum TimeMachineAppearance: String {
+        case withHidden
+        case always
+    }
+
+    /// JustHide's own Time Machine item (see TimeMachineItem.swift), which
+    /// switches Apple's off while it is on. Off by default.
+    static var showsTimeMachine: Bool {
+        get { defaults.bool(forKey: "showsTimeMachine") }
+        set {
+            defaults.set(newValue, forKey: "showsTimeMachine")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// Hidden along with the hidden apps -- what GitHub issue #1 asked for --
+    /// or always in the bar.
+    static var timeMachineAppearance: TimeMachineAppearance {
+        get {
+            defaults.string(forKey: "timeMachineAppearance").flatMap(TimeMachineAppearance.init)
+                ?? .withHidden
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: "timeMachineAppearance")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
     // MARK: - Focus
 
     enum FocusAppearance: String {

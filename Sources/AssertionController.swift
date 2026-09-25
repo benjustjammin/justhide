@@ -130,6 +130,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         }
         NowPlayingItem.shared.apply()
         FocusItem.shared.apply()
+        TimeMachineItem.shared.apply()
 
         // Opening or closing the lid, or plugging a display in, moves the menu
         // bar around, and the bar that appears draws our item from whatever it
@@ -181,6 +182,9 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         // while a probe holding no assertion updated both bars within 80ms.
         // Drawing first means the copy freezes on the right thing.
         JustHide.applyGlyph(to: chevron, concealed: true)
+        // Our own Time Machine item hides with the hidden apps, and goes
+        // before the assertion for the same reason.
+        TimeMachineItem.shared.setConcealed(true)
 
         AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: hidden)) { [weak self] result in
             guard let self = self else { return }
@@ -207,6 +211,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
                     let detail = error.localizedDescription
                     Log.controller.error("conceal failed: \(detail)")
                     Mechanism.report(failure: "macOS would not hide the icons: \(detail)")
+                    TimeMachineItem.shared.setConcealed(false)
                     JustHide.applyWarningGlyph(to: self.chevron)
                     if userAsked { Mechanism.offerFallback(detail: detail) }
                 }
@@ -220,6 +225,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         token = nil
         Mechanism.report(failure: nil)
         JustHide.applyGlyph(to: chevron, concealed: false)
+        TimeMachineItem.shared.setConcealed(false)
         Log.controller.log("revealed")
         scheduleAutoHide()
     }
@@ -363,6 +369,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     @objc private func settingsChanged() {
         NowPlayingItem.shared.apply()
         FocusItem.shared.apply()
+        TimeMachineItem.shared.apply()
         refreshGlyph()
         applyShortcut()
         applyHoverMonitor()

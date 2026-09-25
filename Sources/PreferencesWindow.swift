@@ -29,6 +29,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var focusWhenPopUp: NSPopUpButton?
     private var focusStatusNote: NSTextField?
     private var focusStatusButton: NSButton?
+    private var timeMachineCheckbox: NSButton?
+    private var timeMachineWhenPopUp: NSPopUpButton?
     private var autoHidePopUp: NSPopUpButton?
     private var shortcutButton: NSButton?
     private var shortcutClear: NSButton?
@@ -480,6 +482,29 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         focusStatusButton.translatesAutoresizingMaskIntoConstraints = false
         self.focusStatusButton = focusStatusButton
 
+        // ---- Time Machine. Short: there is no Apple twin to warn about,
+        // because turning this on switches Apple's off.
+        let timeMachineLabel = label("Time Machine", bold: true)
+        let timeMachineCheckbox = NSButton(checkboxWithTitle: "Use JustHide\u{2019}s Time Machine icon",
+                                           target: self, action: #selector(toggleTimeMachine))
+        timeMachineCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        self.timeMachineCheckbox = timeMachineCheckbox
+        let timeMachineNote = label("macOS will not hide Apple\u{2019}s. This switches it off and shows "
+                                    + "one that can: backup status, Back Up Now and Browse Backups. "
+                                    + "Turning this off puts Apple\u{2019}s back.", secondary: true)
+        timeMachineNote.maximumNumberOfLines = 0
+        let timeMachineWhenLabel = label("Show it:")
+        let timeMachineWhenPopUp = NSPopUpButton()
+        for (title, when) in [("Only while icons are shown", Settings.TimeMachineAppearance.withHidden),
+                              ("Always", Settings.TimeMachineAppearance.always)] {
+            timeMachineWhenPopUp.addItem(withTitle: title)
+            timeMachineWhenPopUp.lastItem?.representedObject = when.rawValue
+        }
+        timeMachineWhenPopUp.target = self
+        timeMachineWhenPopUp.action = #selector(changeTimeMachineWhen)
+        timeMachineWhenPopUp.translatesAutoresizingMaskIntoConstraints = false
+        self.timeMachineWhenPopUp = timeMachineWhenPopUp
+
         // ---- Quirks, behind a disclosure. In one column this block is the
         // single biggest thing in the window, and it is reference material: read
         // once, then in the way. Collapsed by default, and the state sticks.
@@ -529,6 +554,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                      nowPlayingWhenPopUp, nowPlayingAppleNote, nowPlayingAppleButton,
                      focusLabel, focusCheckbox, focusNote, focusWhenLabel, focusWhenPopUp,
                      focusStatusNote, focusStatusButton,
+                     timeMachineLabel, timeMachineCheckbox, timeMachineNote,
+                     timeMachineWhenLabel, timeMachineWhenPopUp,
                      quirksLabel, quirksBox] {
             content.addSubview(view)
         }
@@ -564,6 +591,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         nowPlayingAppleNote.preferredMaxLayoutWidth = rightInner
         focusNote.preferredMaxLayoutWidth = rightInner - 18
         focusStatusNote.preferredMaxLayoutWidth = rightInner
+        timeMachineNote.preferredMaxLayoutWidth = rightInner - 18
         quirks.preferredMaxLayoutWidth = leftWidth - 2 * margin - 24
 
         NSLayoutConstraint.activate([
@@ -715,9 +743,26 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             focusStatusNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
             focusStatusButton.topAnchor.constraint(equalTo: focusStatusNote.bottomAnchor, constant: 6),
             focusStatusButton.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
+
+            // ---- Time Machine
+            timeMachineLabel.topAnchor.constraint(equalTo: focusStatusButton.bottomAnchor, constant: 22),
+            timeMachineLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
+
+            timeMachineCheckbox.topAnchor.constraint(equalTo: timeMachineLabel.bottomAnchor, constant: 8),
+            timeMachineCheckbox.leadingAnchor.constraint(equalTo: timeMachineLabel.leadingAnchor),
+
+            timeMachineNote.topAnchor.constraint(equalTo: timeMachineCheckbox.bottomAnchor, constant: 2),
+            timeMachineNote.leadingAnchor.constraint(equalTo: timeMachineLabel.leadingAnchor, constant: 18),
+            timeMachineNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+
+            timeMachineWhenLabel.topAnchor.constraint(equalTo: timeMachineNote.bottomAnchor, constant: 12),
+            timeMachineWhenLabel.leadingAnchor.constraint(equalTo: timeMachineLabel.leadingAnchor),
+            timeMachineWhenPopUp.centerYAnchor.constraint(equalTo: timeMachineWhenLabel.centerYAnchor),
+            timeMachineWhenPopUp.leadingAnchor.constraint(equalTo: nowPlayingStylePopUp.leadingAnchor),
+            timeMachineWhenPopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
             // The window grows to whichever column is taller.
-            focusStatusButton.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor,
-                                                      constant: -margin),
+            timeMachineWhenLabel.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor,
+                                                         constant: -margin),
 
             // ---- The notes, behind their triangle
             quirksToggle.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 18),
@@ -883,6 +928,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         glyphPopUp?.selectItem(at: Settings.Glyph.allCases.firstIndex(of: Settings.glyph) ?? 0)
         applyNowPlayingState()
+        timeMachineCheckbox?.state = Settings.showsTimeMachine ? .on : .off
+        timeMachineWhenPopUp?.isEnabled = Settings.showsTimeMachine
+        timeMachineWhenPopUp?.selectItem(at: Settings.timeMachineAppearance == .withHidden ? 0 : 1)
         newAppsCheckbox?.state = Settings.hidesNewApps ? .on : .off
         applyFocusState()
         if let index = Self.autoHideOptions.firstIndex(where: { $0.seconds == Settings.autoHideDelay }) {
@@ -1253,6 +1301,17 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     @objc private func focusStatusAction() {
         openMenuBarSettings()
+    }
+
+    @objc private func toggleTimeMachine() {
+        Settings.showsTimeMachine = timeMachineCheckbox?.state == .on
+        reload()
+    }
+
+    @objc private func changeTimeMachineWhen() {
+        guard let raw = timeMachineWhenPopUp?.selectedItem?.representedObject as? String,
+              let when = Settings.TimeMachineAppearance(rawValue: raw) else { return }
+        Settings.timeMachineAppearance = when
     }
 
     @objc private func toggleNewApps() {
