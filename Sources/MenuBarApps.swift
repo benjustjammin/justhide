@@ -107,6 +107,26 @@ enum MenuBarApps {
         Set(UserDefaults.standard.stringArray(forKey: knownKey) ?? [])
     }
 
+    /// Records every app with an icon in the bar right now, so that none of
+    /// them counts as new later. Run when "hide new apps" is switched on and
+    /// at each launch, because `known` is otherwise only fed by the picker.
+    static func rememberCurrentOwners() {
+        guard AXIsProcessTrusted() else { return }
+        remember(owners())
+    }
+
+    /// An app that has never had an icon in the bar as far as JustHide knows,
+    /// and is not in the list either -- so one the user unticked stays theirs.
+    /// Apple's own and anything outside an Applications folder never count.
+    static func isNew(_ bundleID: String) -> Bool {
+        !excluded.contains(bundleID) && !known.contains(bundleID)
+            && !Settings.listedBundleIDs.contains(bundleID) && isPresentableApp(bundleID)
+    }
+
+    static func remember(bundleID: String) {
+        remember([bundleID])
+    }
+
     private static func remember(_ bundleIDs: Set<String>) {
         let wanted = known.union(bundleIDs.subtracting(excluded))
         guard wanted != known else { return }

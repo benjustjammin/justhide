@@ -101,6 +101,19 @@ enum Settings {
         }
     }
 
+    // MARK: - New apps
+
+    /// Hide an app the first time it puts an icon in the bar (GitHub issue #2).
+    /// Off by default: the default has always been that nothing hides unasked.
+    static var hidesNewApps: Bool {
+        get { defaults.bool(forKey: "hidesNewApps") }
+        set {
+            defaults.set(newValue, forKey: "hidesNewApps")
+            if newValue { MenuBarApps.rememberCurrentOwners() }
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
     // MARK: - Now Playing
 
     enum NowPlayingStyle: String {

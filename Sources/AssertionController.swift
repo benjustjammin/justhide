@@ -101,6 +101,8 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             self, selector: #selector(settingsChanged),
             name: .justHideSettingsChanged, object: nil)
         knownPIDs = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+        // Everything already in the bar is, by definition, not new.
+        if Settings.hidesNewApps { MenuBarApps.rememberCurrentOwners() }
         // KVO rather than NSWorkspace.didLaunchApplicationNotification, which was
         // measured not to fire for LSUIElement apps -- and a menu bar agent is
         // exactly the kind of app this is about. runningApplications sees them.
@@ -251,6 +253,12 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         let running = NSWorkspace.shared.runningApplications
         let newcomers = running.filter { !knownPIDs.contains($0.processIdentifier) }
         knownPIDs = Set(running.map(\.processIdentifier))
+        if Settings.hidesNewApps, AXIsProcessTrusted() {
+            for app in newcomers {
+                guard let bundleID = app.bundleIdentifier, MenuBarApps.isNew(bundleID) else { continue }
+                checkForNewApp(app, named: bundleID, attempt: 0)
+            }
+        }
         guard isConcealed else { return }
         for app in newcomers {
             guard let bundleID = app.bundleIdentifier,
@@ -276,6 +284,28 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             }
             Log.controller.log("\(bundleID) put a menu bar icon up after we concealed; refreshing the allowlist")
             self.scheduleAllowlistRefresh()
+        }
+    }
+
+    /// "Hide new menu bar apps": a never-seen app is hidden the moment it is
+    /// seen to own an icon, on the same schedule as the check above, because
+    /// apps take a while to put one up. Only with Accessibility, since without
+    /// it there is no telling whether an app has an icon at all, and hiding
+    /// every app that launched would be wrong. Hiding also lists it, so it gets
+    /// a row whose tick box undoes this; an unticked app stays listed and so is
+    /// never "new" again.
+    private func checkForNewApp(_ app: NSRunningApplication, named bundleID: String, attempt: Int) {
+        guard attempt < Self.itemChecks.count else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemChecks[attempt]) { [weak self] in
+            guard let self = self, Settings.hidesNewApps, !app.isTerminated,
+                  MenuBarApps.isNew(bundleID) else { return }
+            guard AXMenuBar.hasItems(forPID: app.processIdentifier) else {
+                self.checkForNewApp(app, named: bundleID, attempt: attempt + 1)
+                return
+            }
+            Log.controller.log("\(bundleID) is new to the menu bar; hiding it")
+            MenuBarApps.remember(bundleID: bundleID)
+            Settings.hiddenBundleIDs = Settings.hiddenBundleIDs.union([bundleID])
         }
     }
 

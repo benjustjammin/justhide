@@ -17,6 +17,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var table: NSTableView?
     private var loginCheckbox: NSButton?
     private var hoverCheckbox: NSButton?
+    private var newAppsCheckbox: NSButton?
     private var clockCheckbox: NSButton?
     private var clockNote: NSTextField?
     private var glyphPopUp: NSPopUpButton?
@@ -323,6 +324,14 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         loginCheckbox.translatesAutoresizingMaskIntoConstraints = false
         self.loginCheckbox = loginCheckbox
 
+        let newAppsCheckbox = NSButton(checkboxWithTitle: "Hide new menu bar apps automatically",
+                                       target: self, action: #selector(toggleNewApps))
+        newAppsCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        newAppsCheckbox.toolTip = "An app that has never had an icon in the bar is hidden when it "
+            + "first puts one up, and added to the list above, where unticking Hidden keeps it "
+            + "visible for good. Needs Accessibility, to see the icon."
+        self.newAppsCheckbox = newAppsCheckbox
+
         let hoverCheckbox = NSButton(checkboxWithTitle: "Reveal on hover in the menu bar",
                                      target: self, action: #selector(toggleHover))
         hoverCheckbox.translatesAutoresizingMaskIntoConstraints = false
@@ -512,7 +521,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         for view in [iconView, name, subtitle, updateRow, listLabel, scroll, listButtons, perAppNote,
                      quirksToggle,
                      accessRow, mechanismRow, optionsLabel,
-                     loginCheckbox, hoverCheckbox, clockCheckbox, clockNote,
+                     loginCheckbox, newAppsCheckbox, hoverCheckbox, clockCheckbox, clockNote,
                      updatesCheckbox, autoHideLabel, autoHidePopUp,
                      shortcutLabel, shortcutButton, shortcutClear, glyphLabel, glyphPopUp,
                      nowPlayingLabel, nowPlayingCheckbox, nowPlayingNote,
@@ -609,7 +618,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             loginCheckbox.topAnchor.constraint(equalTo: optionsLabel.bottomAnchor, constant: 8),
             loginCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
 
-            hoverCheckbox.topAnchor.constraint(equalTo: loginCheckbox.bottomAnchor, constant: 6),
+            newAppsCheckbox.topAnchor.constraint(equalTo: loginCheckbox.bottomAnchor, constant: 6),
+            newAppsCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
+
+            hoverCheckbox.topAnchor.constraint(equalTo: newAppsCheckbox.bottomAnchor, constant: 6),
             hoverCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
 
             clockCheckbox.topAnchor.constraint(equalTo: hoverCheckbox.bottomAnchor, constant: 6),
@@ -871,6 +883,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         glyphPopUp?.selectItem(at: Settings.Glyph.allCases.firstIndex(of: Settings.glyph) ?? 0)
         applyNowPlayingState()
+        newAppsCheckbox?.state = Settings.hidesNewApps ? .on : .off
         applyFocusState()
         if let index = Self.autoHideOptions.firstIndex(where: { $0.seconds == Settings.autoHideDelay }) {
             autoHidePopUp?.selectItem(at: index)
@@ -1000,9 +1013,13 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         var needed: [String] = []
         if Settings.clockClickThrough { needed.append("the clock option") }
         if !Settings.itemShortcuts.isEmpty { needed.append("menu bar shortcuts") }
+        if Settings.hidesNewApps { needed.append("hiding new apps") }
+        if Settings.showsFocus { needed.append("opening the Focus modes") }
         guard !needed.isEmpty else { return nil }
 
-        let what = needed.joined(separator: " and ")
+        let what = needed.count > 1
+            ? needed.dropLast().joined(separator: ", ") + " and " + needed.last!
+            : needed[0]
         let base = "Accessibility is off for JustHide, so \(what) cannot work. "
         // macOS ties the grant to the exact code signature, so installing a new
         // build drops it even though System Settings may still show JustHide
@@ -1236,6 +1253,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     @objc private func focusStatusAction() {
         openMenuBarSettings()
+    }
+
+    @objc private func toggleNewApps() {
+        Settings.hidesNewApps = newAppsCheckbox?.state == .on
+        reload()
     }
 
     @objc private func toggleNowPlaying() {
