@@ -155,6 +155,39 @@ enum Settings {
         return (value as? Int).map { $0 != 8 } ?? true
     }
 
+    // MARK: - Focus
+
+    enum FocusAppearance: String {
+        case whileOn
+        case always
+    }
+
+    /// JustHide's own Focus item (see FocusItem.swift). Off by default: it
+    /// needs Full Disk Access.
+    static var showsFocus: Bool {
+        get { defaults.bool(forKey: "showsFocus") }
+        set {
+            defaults.set(newValue, forKey: "showsFocus")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    static var focusAppearance: FocusAppearance {
+        get { defaults.string(forKey: "focusAppearance").flatMap(FocusAppearance.init) ?? .whileOn }
+        set {
+            defaults.set(newValue.rawValue, forKey: "focusAppearance")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// Whether Apple's own Focus icon is set to appear. Read only, like
+    /// appleNowPlayingIsOn; 8 means "Don't Show".
+    static var appleFocusIsOn: Bool {
+        let value = CFPreferencesCopyValue("FocusModes" as CFString, "com.apple.controlcenter" as CFString,
+                                           kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)
+        return (value as? Int).map { $0 != 8 } ?? true
+    }
+
     // MARK: - Appearance
 
     /// The menu bar glyph.

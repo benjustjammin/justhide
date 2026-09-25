@@ -314,7 +314,7 @@ final class TitleStrip: NSView {
     private var pauseTicks = 0
     private var overflow: CGFloat = 0
 
-    private static let padding: CGFloat = 6
+    private static let padding: CGFloat = 2
     private static let iconWidth: CGFloat = 18
     private static let gap: CGFloat = 5
     /// Points per tick, and ticks per second: slow enough to read.

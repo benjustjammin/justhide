@@ -127,6 +127,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             self.scheduleAllowlistRefresh()
         }
         NowPlayingItem.shared.apply()
+        FocusItem.shared.apply()
 
         // Opening or closing the lid, or plugging a display in, moves the menu
         // bar around, and the bar that appears draws our item from whatever it
@@ -331,6 +332,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
 
     @objc private func settingsChanged() {
         NowPlayingItem.shared.apply()
+        FocusItem.shared.apply()
         refreshGlyph()
         applyShortcut()
         applyHoverMonitor()
