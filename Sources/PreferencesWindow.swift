@@ -160,7 +160,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     // MARK: - Building
 
     private func build() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 620),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.windowWidth, height: 620),
                               styleMask: [.titled, .closable],
                               backing: .buffered, defer: false)
         window.title = "JustHide Settings"
@@ -416,7 +416,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         let nowPlayingWhenLabel = label("Show it:")
         let nowPlayingWhenPopUp = NSPopUpButton()
-        for (title, when) in [("While a song is playing or paused", Settings.NowPlayingAppearance.whilePlaying),
+        for (title, when) in [("While playing or paused", Settings.NowPlayingAppearance.whilePlaying),
                               ("Always", Settings.NowPlayingAppearance.always)] {
             nowPlayingWhenPopUp.addItem(withTitle: title)
             nowPlayingWhenPopUp.lastItem?.representedObject = when.rawValue
@@ -529,22 +529,36 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         // ---- Layout
         //
-        // One column, 700pt wide rather than the original 520. The width is what
-        // keeps it short: prose that wrapped to four lines at 520 takes two
-        // here, and the pop-ups sit beside their labels instead of under them.
-        // A two-column version was tried and rejected -- it read as two separate
-        // panes rather than one window.
+        // The hiding settings are one column, 700pt wide rather than the
+        // original 520: prose that wrapped to four lines at 520 takes two, and
+        // the pop-ups sit beside their labels. An earlier two-column version was
+        // rejected because it split HIDING across two panes. This one splits by
+        // topic instead: Now Playing and Focus, the items JustHide adds to the
+        // bar, go in a column of their own on the right, since in one column
+        // the window had grown taller than a laptop screen.
         let margin: CGFloat = 20
-        let windowWidth: CGFloat = 700
+        let leftWidth = Self.leftColumnWidth
+        let windowWidth = Self.windowWidth
         let controlColumn = content.leadingAnchor
+        // The right column holds the two items JustHide adds to the bar, Now
+        // Playing and Focus: things it SHOWS, beside the things it hides. A
+        // second column rather than more height, because one column had
+        // grown past the height of a laptop screen.
+        let rightColumn = content.leadingAnchor
+        let rightInset = leftWidth + margin
+        let rightInner = windowWidth - leftWidth - 2 * margin
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(divider)
 
-        perAppNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 120
-        clockNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
-        nowPlayingNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
-        nowPlayingAppleNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
-        focusNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
-        focusStatusNote.preferredMaxLayoutWidth = windowWidth - 2 * margin - 18
-        quirks.preferredMaxLayoutWidth = windowWidth - 2 * margin - 24
+        perAppNote.preferredMaxLayoutWidth = leftWidth - 2 * margin - 120
+        clockNote.preferredMaxLayoutWidth = leftWidth - 2 * margin - 18
+        nowPlayingNote.preferredMaxLayoutWidth = rightInner - 18
+        nowPlayingAppleNote.preferredMaxLayoutWidth = rightInner
+        focusNote.preferredMaxLayoutWidth = rightInner - 18
+        focusStatusNote.preferredMaxLayoutWidth = rightInner
+        quirks.preferredMaxLayoutWidth = leftWidth - 2 * margin - 24
 
         NSLayoutConstraint.activate([
             iconView.topAnchor.constraint(equalTo: content.topAnchor, constant: margin),
@@ -577,7 +591,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
             scroll.topAnchor.constraint(equalTo: listLabel.bottomAnchor, constant: 6),
             scroll.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            scroll.trailingAnchor.constraint(equalTo: controlColumn, constant: leftWidth - margin),
             listHeight,
 
             listButtons.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 6),
@@ -588,8 +602,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             // it now, and it saves a line.
             perAppNote.centerYAnchor.constraint(equalTo: listButtons.centerYAnchor),
             perAppNote.leadingAnchor.constraint(equalTo: listButtons.trailingAnchor, constant: 12),
-            perAppNote.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor,
-                                                 constant: -margin),
+            perAppNote.trailingAnchor.constraint(lessThanOrEqualTo: controlColumn,
+                                                 constant: leftWidth - margin),
 
             // ---- The options
             optionsLabel.topAnchor.constraint(equalTo: listButtons.bottomAnchor, constant: 18),
@@ -608,7 +622,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             // small print rather than as another setting.
             clockNote.topAnchor.constraint(equalTo: clockCheckbox.bottomAnchor, constant: 2),
             clockNote.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor, constant: 18),
-            clockNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            clockNote.trailingAnchor.constraint(equalTo: controlColumn, constant: leftWidth - margin),
 
             updatesCheckbox.topAnchor.constraint(equalTo: clockNote.bottomAnchor, constant: 8),
             updatesCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
@@ -635,9 +649,15 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             glyphPopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
             glyphPopUp.widthAnchor.constraint(equalToConstant: 220),
 
+            // ---- The right column, level with the list
+            divider.topAnchor.constraint(equalTo: listLabel.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -margin),
+            divider.leadingAnchor.constraint(equalTo: controlColumn, constant: leftWidth),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+
             // ---- Now Playing
-            nowPlayingLabel.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 18),
-            nowPlayingLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingLabel.topAnchor.constraint(equalTo: listLabel.topAnchor),
+            nowPlayingLabel.leadingAnchor.constraint(equalTo: rightColumn, constant: rightInset),
 
             nowPlayingCheckbox.topAnchor.constraint(equalTo: nowPlayingLabel.bottomAnchor, constant: 8),
             nowPlayingCheckbox.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
@@ -647,26 +667,26 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             nowPlayingNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
             nowPlayingStyleLabel.topAnchor.constraint(equalTo: nowPlayingNote.bottomAnchor, constant: 12),
-            nowPlayingStyleLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingStyleLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
             nowPlayingStylePopUp.centerYAnchor.constraint(equalTo: nowPlayingStyleLabel.centerYAnchor),
-            nowPlayingStylePopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
-            nowPlayingStylePopUp.widthAnchor.constraint(equalToConstant: 220),
+            nowPlayingStylePopUp.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 120),
+            nowPlayingStylePopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
             nowPlayingWhenLabel.topAnchor.constraint(equalTo: nowPlayingStyleLabel.bottomAnchor, constant: 14),
-            nowPlayingWhenLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingWhenLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
             nowPlayingWhenPopUp.centerYAnchor.constraint(equalTo: nowPlayingWhenLabel.centerYAnchor),
-            nowPlayingWhenPopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
-            nowPlayingWhenPopUp.widthAnchor.constraint(equalToConstant: 260),
+            nowPlayingWhenPopUp.leadingAnchor.constraint(equalTo: nowPlayingStylePopUp.leadingAnchor),
+            nowPlayingWhenPopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
             nowPlayingAppleNote.topAnchor.constraint(equalTo: nowPlayingWhenLabel.bottomAnchor, constant: 12),
-            nowPlayingAppleNote.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingAppleNote.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
             nowPlayingAppleNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
             nowPlayingAppleButton.topAnchor.constraint(equalTo: nowPlayingAppleNote.bottomAnchor, constant: 6),
-            nowPlayingAppleButton.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            nowPlayingAppleButton.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
 
             // ---- Focus
-            focusLabel.topAnchor.constraint(equalTo: nowPlayingAppleButton.bottomAnchor, constant: 18),
-            focusLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            focusLabel.topAnchor.constraint(equalTo: nowPlayingAppleButton.bottomAnchor, constant: 22),
+            focusLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
 
             focusCheckbox.topAnchor.constraint(equalTo: focusLabel.bottomAnchor, constant: 8),
             focusCheckbox.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
@@ -676,26 +696,29 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             focusNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
             focusWhenLabel.topAnchor.constraint(equalTo: focusNote.bottomAnchor, constant: 12),
-            focusWhenLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            focusWhenLabel.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
             focusWhenPopUp.centerYAnchor.constraint(equalTo: focusWhenLabel.centerYAnchor),
-            focusWhenPopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
-            focusWhenPopUp.widthAnchor.constraint(equalToConstant: 220),
+            focusWhenPopUp.leadingAnchor.constraint(equalTo: nowPlayingStylePopUp.leadingAnchor),
+            focusWhenPopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
             focusStatusNote.topAnchor.constraint(equalTo: focusWhenLabel.bottomAnchor, constant: 12),
-            focusStatusNote.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            focusStatusNote.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
             focusStatusNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
             focusStatusButton.topAnchor.constraint(equalTo: focusStatusNote.bottomAnchor, constant: 6),
-            focusStatusButton.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
+            focusStatusButton.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
+            // The window grows to whichever column is taller.
+            focusStatusButton.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor,
+                                                      constant: -margin),
 
             // ---- The notes, behind their triangle
-            quirksToggle.topAnchor.constraint(equalTo: focusStatusButton.bottomAnchor, constant: 18),
+            quirksToggle.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 18),
             quirksToggle.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
             quirksLabel.centerYAnchor.constraint(equalTo: quirksToggle.centerYAnchor),
             quirksLabel.leadingAnchor.constraint(equalTo: quirksToggle.trailingAnchor, constant: 4),
 
             quirksBox.topAnchor.constraint(equalTo: quirksToggle.bottomAnchor, constant: 6),
             quirksBox.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            quirksBox.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            quirksBox.trailingAnchor.constraint(equalTo: controlColumn, constant: leftWidth - margin),
             quirksBox.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor,
                                               constant: -margin),
         ])
@@ -730,10 +753,15 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // Fit the window to the content rather than to a guessed height.
         content.layoutSubtreeIfNeeded()
         let needed = content.fittingSize
-        window.setContentSize(NSSize(width: windowWidth, height: max(needed.height + margin, 480)))
+        window.setContentSize(NSSize(width: Self.windowWidth, height: max(needed.height + margin, 480)))
 
         self.window = window
     }
+
+    /// The original single column, and the right-hand one for the items
+    /// JustHide adds to the bar.
+    private static let leftColumnWidth: CGFloat = 700
+    private static let windowWidth: CGFloat = 1080
 
     /// Written for someone who did not implement it: what is surprising, and why.
     private static var quirksText: String {
@@ -1065,7 +1093,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         guard let window = window, let content = window.contentView else { return }
         content.layoutSubtreeIfNeeded()
         let needed = content.fittingSize
-        window.setContentSize(NSSize(width: 700, height: max(needed.height + 20, 480)))
+        window.setContentSize(NSSize(width: Self.windowWidth, height: max(needed.height + 20, 480)))
     }
 
     @objc private func mechanismChanged() {
