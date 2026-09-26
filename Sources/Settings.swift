@@ -126,8 +126,29 @@ enum Settings {
         case whilePlaying
     }
 
+    enum NowPlayingSource: String {
+        /// Music alone, from its own announcements and AppleScript.
+        case music
+        /// Whatever macOS's own Now Playing shows: any app, browsers included.
+        case everything
+    }
+
+    /// Where the item takes its song from. Anyone who had the item on before
+    /// the choice existed keeps Music, which is all it used to follow; a new
+    /// user gets what Apple's shows.
+    static var nowPlayingSource: NowPlayingSource {
+        get {
+            defaults.string(forKey: "nowPlayingSource").flatMap(NowPlayingSource.init)
+                ?? (defaults.object(forKey: "showsNowPlaying") != nil ? .music : .everything)
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: "nowPlayingSource")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
     /// JustHide's own Now Playing item (see NowPlaying.swift). Off by default:
-    /// it adds an icon, and it asks for Automation the first time it is used.
+    /// it adds an icon, and following Music asks for Automation the first time.
     static var showsNowPlaying: Bool {
         get { defaults.bool(forKey: "showsNowPlaying") }
         set {

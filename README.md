@@ -32,14 +32,15 @@ show its own.
 - macOS 27 (Golden Gate) or later
 - No Screen Recording, no Developer ID, no sandbox exceptions
 - Accessibility is **optional**, and never asked for at launch.[^ax]
-- The optional Now Playing item asks once for permission to control Music, the first
-  time you use its controls. The Focus item needs nothing extra.
+- The optional Now Playing item needs nothing when it follows any app; following Music
+  alone, it asks once for permission to control Music. The optional Focus item needs
+  Full Disk Access to list your Focuses and a shortcut, added once, to switch them.
 
-[^ax]: Hiding needs no permission at all. Accessibility buys six things: listing
+[^ax]: Hiding needs no permission at all. Accessibility buys five things: listing
 which apps have menu bar icons right now, so the picker can show them; checking
 whether a newly launched app actually put an icon up before the allowlist is
-refreshed; per-icon keyboard shortcuts; letting the clock through; hiding new apps
-automatically; and opening the Focus modes from JustHide's Focus icon. The first two
+refreshed; per-icon keyboard shortcuts; letting the clock through; and hiding new
+apps automatically. The first two
 degrade quietly — you add apps from the same picker or with **Other App…** — but the
 others do nothing without it, so Settings shows a notice when one of them is on and
 the permission is missing. The picker's **Allow…** button is the ask, and its **↻**
@@ -118,14 +119,29 @@ All three are off until you switch them on, in the right-hand column of Settings
 Now Playing and Focus stay in the bar while your other icons are hidden — which
 Apple's own do not — and Time Machine can finally hide with them.
 
-- **Now Playing** follows Music. In the bar it is either an icon (a waveform while
+- **Now Playing** follows any app, like Apple's — Music, Spotify, a video in Safari,
+  Chrome or any other browser — or Music alone if you prefer. In the bar it is either an icon (a waveform while
   playing, a circled pause while paused) or the icon, the song and a heart; a long
   title scrolls rather than pushing the bar about, and the heart favourites the song.
   Click it for a small player: artwork, progress, previous / play-pause / next and the
-  heart. Show it always, or only while a song is playing or paused.
+  heart (Music songs only). Show it always, or only while something is playing or
+  paused. Following any app reads macOS's own Now Playing through a small helper run
+  inside macOS's own `/usr/bin/perl`, because macOS answers only Apple's programs; if a
+  future macOS closes that door, choose Music.
 - **Focus** shows the current Focus with that Focus's own symbol, your own Focuses
   included, and follows changes within a couple of seconds. Show it only while a Focus
-  is on, or always. Click it for the Focus modes (see Good to know).
+  is on, or always. Click it for a menu of your Focuses, the one that is on ticked:
+  choose one to switch to it, or the ticked one to turn it off. Nothing unhides and
+  nothing else opens first.
+
+  Two things make that possible, and Settings walks you through both. **Full Disk
+  Access**, used only to read the list of your Focuses (they live in a protected
+  folder); without it the menu shows just the Focus that is on. And **one shortcut,
+  "JustHide Focus"**, which JustHide offers to add to Shortcuts — macOS lets no app
+  switch Focus itself, but a shortcut can, and JustHide runs it in the background. One
+  shortcut covers every Focus, including ones you make later. The first time it runs,
+  macOS asks whether JustHide may run it: choose **Always Allow**. Please keep it; if
+  it goes, the Focus menu offers to add it back.
 - **Time Machine** replaces Apple's icon, which macOS will not hide: switching it on
   switches Apple's off (and switching it off puts Apple's back), and JustHide's shows
   only while your icons are shown, or always if you prefer. Its menu has the backup
@@ -155,10 +171,9 @@ macOS 27 works rather than choices:
   it. That costs a brief flash of your hidden icons, and needs Accessibility. Left
   off, swipe in from the right edge or reveal first. Wi-Fi and Control Centre are
   unaffected either way.
-- **JustHide's Focus opens the modes through Control Centre**, so Control Centre
-  shows first and then switches to them. Apple's own dropdown only opens from Apple's
-  own icon, which is gone while anything is hidden, and taking the hiding down to
-  reach it would flash every hidden icon. This is the one route that always works.
+- **JustHide's Focus menu is its own, not Apple's.** Apple's dropdown only opens from
+  Apple's icon, which is gone while anything is hidden, so JustHide lists your Focuses
+  itself and switches them through its shortcut. It has no "for 1 hour" timings.
 - **This uses part of macOS that Apple doesn't document.** If an update breaks it,
   JustHide says so on its menu bar symbol and offers you the older layout-based
   method there and then — in the dialog, in the symbol's menu, and in Settings.

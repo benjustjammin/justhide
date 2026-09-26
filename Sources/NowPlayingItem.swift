@@ -100,7 +100,8 @@ final class NowPlayingItem: NSObject {
         }
         button.setAccessibilityLabel(track.map { "Now Playing: \($0.name), \($0.artist)" }
                                      ?? "Now Playing: nothing")
-        button.toolTip = track.map { "\($0.name)\n\($0.artist)" }
+        button.toolTip = track.map { [$0.name, $0.artist, $0.appName].filter { !$0.isEmpty }
+                                     .joined(separator: "\n") }
     }
 
     @objc private func clicked() {
@@ -217,11 +218,13 @@ final class PlayerViewController: NSViewController {
 
     func show(_ track: Track?) {
         guard isViewLoaded else { return }
-        let changedSong = track?.name != shownTrack?.name || track?.player != shownTrack?.player
+        let changedSong = !(track?.isSameSong(as: shownTrack) ?? (shownTrack == nil))
         shownTrack = track
         titleLabel.stringValue = track?.name ?? "Nothing playing"
-        subtitle.stringValue = [track?.artist, track?.album]
-            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{2014} ")
+        // A web page often has no artist or album; the app it plays in is
+        // then the next best thing, as in Apple's player.
+        let details = [track?.artist, track?.album].compactMap { $0 }.filter { !$0.isEmpty }
+        subtitle.stringValue = details.isEmpty ? (track?.appName ?? "") : details.joined(separator: " \u{2014} ")
         playPause.image = NSImage(systemSymbolName: track?.isPlaying == true ? "pause.fill" : "play.fill",
                                   accessibilityDescription: track?.isPlaying == true ? "Pause" : "Play")
         controls.forEach { $0.isEnabled = track != nil }
@@ -230,12 +233,14 @@ final class PlayerViewController: NSViewController {
         heart.image = NSImage(systemSymbolName: favourite == true ? "heart.fill" : "heart",
                               accessibilityDescription: favourite == true ? "Unfavourite" : "Favourite")
         heart.contentTintColor = favourite == true ? .systemPink : .secondaryLabelColor
-        if track == nil {
+        if track == nil || changedSong {
             artwork.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)
-        } else if changedSong, let player = track?.player {
-            artwork.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)
-            PlayerControl.artwork(of: player) { [weak self] image in
-                guard let self = self, self.shownTrack?.player == player else { return }
+        }
+        // The system source keeps its picture to hand and may deliver it after
+        // the song, so it is asked every time; Music's costs a script, so once.
+        if let track = track, changedSong || track.viaSystem {
+            NowPlayingMonitor.shared.artwork { [weak self] image in
+                guard let self = self, self.shownTrack?.isSameSong(as: track) == true else { return }
                 if let image = image { self.artwork.image = image }
             }
         }
@@ -263,8 +268,8 @@ final class PlayerViewController: NSViewController {
             problem.isHidden = true
             return
         }
-        let position = PlayerControl.position(of: track.player)
-        let refused = PlayerControl.lastProblem
+        let position = NowPlayingMonitor.shared.position()
+        let refused = NowPlayingMonitor.shared.problem
         problem.stringValue = refused ?? ""
         problem.isHidden = refused == nil
         let showsPlayhead = refused == nil && position != nil && track.duration != nil
@@ -288,8 +293,8 @@ final class PlayerViewController: NSViewController {
     /// The notification that follows updates the item and this view; the
     /// playhead is re-read straight away so the bar does not lag a second.
     private func command(_ command: PlayerControl.Command) {
-        guard let player = shownTrack?.player else { return }
-        PlayerControl.send(command, to: player)
+        guard shownTrack != nil else { return }
+        NowPlayingMonitor.shared.send(command)
         tick()
     }
 }

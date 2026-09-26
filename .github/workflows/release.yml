@@ -60,6 +60,8 @@ jobs:
           echo "Signing as: $IDENTITY"
           ./build.sh build/JustHide.app
           codesign --force --options runtime --timestamp \
+                   --sign "$IDENTITY" build/JustHide.app/Contents/Frameworks/NowPlayingHelper.dylib
+          codesign --force --options runtime --timestamp \
                    --sign "$IDENTITY" build/JustHide.app
           codesign --verify --strict --verbose=2 build/JustHide.app
           codesign -d --requirements - build/JustHide.app

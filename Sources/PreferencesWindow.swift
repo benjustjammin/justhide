@@ -22,6 +22,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var clockNote: NSTextField?
     private var glyphPopUp: NSPopUpButton?
     private var nowPlayingCheckbox: NSButton?
+    private var nowPlayingSourcePopUp: NSPopUpButton?
+    private var nowPlayingNote: NSTextField?
     private var nowPlayingStylePopUp: NSPopUpButton?
     private var nowPlayingWhenPopUp: NSPopUpButton?
     private var nowPlayingAppleNote: NSTextField?
@@ -402,15 +404,27 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // ---- Now Playing. Its own section: it is a feature of its own rather
         // than a way of hiding, and it has three settings of its own.
         let nowPlayingLabel = label("Now Playing", bold: true)
-        let nowPlayingCheckbox = NSButton(checkboxWithTitle: "Show Now Playing for Music",
+        let nowPlayingCheckbox = NSButton(checkboxWithTitle: "Show Now Playing",
                                           target: self, action: #selector(toggleNowPlaying))
         nowPlayingCheckbox.translatesAutoresizingMaskIntoConstraints = false
         self.nowPlayingCheckbox = nowPlayingCheckbox
-        let nowPlayingNote = label("Unlike Apple\u{2019}s, it stays while icons are hidden. Click it for "
-                                   + "the player; with the song showing, the heart at the end favourites "
-                                   + "it. The controls ask once for permission to control Music.",
-                                   secondary: true)
+        // Worded by applyNowPlayingState, because what it says about
+        // permission depends on the source.
+        let nowPlayingNote = label("", secondary: true)
         nowPlayingNote.maximumNumberOfLines = 0
+        self.nowPlayingNote = nowPlayingNote
+
+        let nowPlayingSourceLabel = label("Follow:")
+        let nowPlayingSourcePopUp = NSPopUpButton()
+        for (title, source) in [("Any app, like macOS", Settings.NowPlayingSource.everything),
+                                ("Apple Music only", Settings.NowPlayingSource.music)] {
+            nowPlayingSourcePopUp.addItem(withTitle: title)
+            nowPlayingSourcePopUp.lastItem?.representedObject = source.rawValue
+        }
+        nowPlayingSourcePopUp.target = self
+        nowPlayingSourcePopUp.action = #selector(changeNowPlayingSource)
+        nowPlayingSourcePopUp.translatesAutoresizingMaskIntoConstraints = false
+        self.nowPlayingSourcePopUp = nowPlayingSourcePopUp
 
         let nowPlayingStyleLabel = label("In the menu bar:")
         let nowPlayingStylePopUp = NSPopUpButton()
@@ -455,10 +469,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         focusCheckbox.translatesAutoresizingMaskIntoConstraints = false
         self.focusCheckbox = focusCheckbox
         let focusNote = label("Unlike Apple\u{2019}s, it stays while icons are hidden, with each "
-                              + "Focus\u{2019}s own symbol. Click it for the Focus modes \u{2014} "
-                              + "macOS only lets another app reach them through Control Centre, so "
-                              + "Control Centre opens first and then switches to them. Opening "
-                              + "them needs Accessibility.", secondary: true)
+                              + "Focus\u{2019}s own symbol. Click it to switch Focus. Listing your "
+                              + "Focuses needs Full Disk Access, which JustHide uses only to read "
+                              + "that list; switching goes through one shortcut, \u{201C}JustHide "
+                              + "Focus\u{201D}, added to Shortcuts once \u{2014} the only way macOS "
+                              + "lets an app do it.", secondary: true)
         focusNote.maximumNumberOfLines = 0
 
         let focusWhenLabel = label("Show it:")
@@ -476,7 +491,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         let focusStatusNote = label("", secondary: true)
         focusStatusNote.maximumNumberOfLines = 0
         self.focusStatusNote = focusStatusNote
-        let focusStatusButton = NSButton(title: "", target: self, action: #selector(focusStatusAction))
+        let focusStatusButton = NSButton(title: "", target: self, action: #selector(focusStatusClicked))
         focusStatusButton.bezelStyle = .rounded
         focusStatusButton.controlSize = .small
         focusStatusButton.translatesAutoresizingMaskIntoConstraints = false
@@ -550,6 +565,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                      updatesCheckbox, autoHideLabel, autoHidePopUp,
                      shortcutLabel, shortcutButton, shortcutClear, glyphLabel, glyphPopUp,
                      nowPlayingLabel, nowPlayingCheckbox, nowPlayingNote,
+                     nowPlayingSourceLabel, nowPlayingSourcePopUp,
                      nowPlayingStyleLabel, nowPlayingStylePopUp, nowPlayingWhenLabel,
                      nowPlayingWhenPopUp, nowPlayingAppleNote, nowPlayingAppleButton,
                      focusLabel, focusCheckbox, focusNote, focusWhenLabel, focusWhenPopUp,
@@ -703,10 +719,16 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             nowPlayingNote.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 18),
             nowPlayingNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
-            nowPlayingStyleLabel.topAnchor.constraint(equalTo: nowPlayingNote.bottomAnchor, constant: 12),
+            nowPlayingSourceLabel.topAnchor.constraint(equalTo: nowPlayingNote.bottomAnchor, constant: 12),
+            nowPlayingSourceLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
+            nowPlayingSourcePopUp.centerYAnchor.constraint(equalTo: nowPlayingSourceLabel.centerYAnchor),
+            nowPlayingSourcePopUp.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 120),
+            nowPlayingSourcePopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+
+            nowPlayingStyleLabel.topAnchor.constraint(equalTo: nowPlayingSourceLabel.bottomAnchor, constant: 14),
             nowPlayingStyleLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
             nowPlayingStylePopUp.centerYAnchor.constraint(equalTo: nowPlayingStyleLabel.centerYAnchor),
-            nowPlayingStylePopUp.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 120),
+            nowPlayingStylePopUp.leadingAnchor.constraint(equalTo: nowPlayingSourcePopUp.leadingAnchor),
             nowPlayingStylePopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
 
             nowPlayingWhenLabel.topAnchor.constraint(equalTo: nowPlayingStyleLabel.bottomAnchor, constant: 14),
@@ -832,8 +854,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             "• While anything is hidden, macOS also hides its own Now Playing and Focus "
             + "icons. JustHide\u{2019}s own versions stay; to avoid seeing two of each while "
             + "icons are revealed, set Apple\u{2019}s to \u{201C}Don\u{2019}t Show\u{201D} under "
-            + "Menu Bar in System Settings. JustHide\u{2019}s Focus opens the modes through "
-            + "Control Centre, the only way another app can reach them.",
+            + "Menu Bar in System Settings. JustHide\u{2019}s Focus switches modes through its "
+            + "\u{201C}JustHide Focus\u{201D} shortcut, so keep that in Shortcuts.",
         ]
         if Settings.clockClickThrough {
             notes.append("• Clicking the clock unhides briefly so Notification Center opens, "
@@ -1062,7 +1084,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         if Settings.clockClickThrough { needed.append("the clock option") }
         if !Settings.itemShortcuts.isEmpty { needed.append("menu bar shortcuts") }
         if Settings.hidesNewApps { needed.append("hiding new apps") }
-        if Settings.showsFocus { needed.append("opening the Focus modes") }
         guard !needed.isEmpty else { return nil }
 
         let what = needed.count > 1
@@ -1257,8 +1278,17 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private func applyNowPlayingState() {
         let on = Settings.showsNowPlaying
         nowPlayingCheckbox?.state = on ? .on : .off
+        nowPlayingSourcePopUp?.isEnabled = on
         nowPlayingStylePopUp?.isEnabled = on
         nowPlayingWhenPopUp?.isEnabled = on
+        let source = Settings.nowPlayingSource
+        nowPlayingSourcePopUp?.selectItem(at: source == .everything ? 0 : 1)
+        let permission = source == .everything
+            ? "Needs no permission; a Music favourite asks once to control Music."
+            : "The controls ask once for permission to control Music."
+        nowPlayingNote?.stringValue = "Unlike Apple\u{2019}s, it stays while icons are hidden. Click it "
+            + "for the player; with the song showing, the heart favourites a Music song. " + permission
+            + (source == .everything ? NowPlayingMonitor.shared.problem.map { "\n" + $0 } ?? "" : "")
         nowPlayingStylePopUp?.selectItem(at: Settings.nowPlayingStyle == .icon ? 0 : 1)
         nowPlayingWhenPopUp?.selectItem(at: Settings.nowPlayingAppearance == .whilePlaying ? 0 : 1)
         // Two players side by side is only possible while icons are revealed:
@@ -1270,21 +1300,44 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             : "Apple\u{2019}s own Now Playing is switched off, so this is the only one."
     }
 
-    /// The two-icons note, as for Now Playing.
+    /// One status line and one button, most pressing first: without Full
+    /// Disk Access there is no list, without the shortcut no switching, and
+    /// only then the two-icons note, as for Now Playing.
     private func applyFocusState() {
         let on = Settings.showsFocus
         focusCheckbox?.state = on ? .on : .off
         focusWhenPopUp?.isEnabled = on
         focusWhenPopUp?.selectItem(at: Settings.focusAppearance == .whileOn ? 0 : 1)
-        if Settings.appleFocusIsOn {
+        applyFocusStatus()
+        // `shortcuts list` takes a moment, so the line is redrawn when it answers.
+        if on { FocusShortcut.refresh { [weak self] in self?.applyFocusStatus() } }
+    }
+
+    private enum FocusStatusAction { case fullDiskAccess, shortcut, menuBarSettings }
+    private var focusStatusAction: FocusStatusAction = .menuBarSettings
+
+    private func applyFocusStatus() {
+        if Settings.showsFocus && !FocusModes.isReadable {
+            focusStatusNote?.stringValue = "To list your Focuses, JustHide needs Full Disk Access. "
+                + "Without it the menu shows only the Focus that is on."
+            focusStatusButton?.title = "Open Full Disk Access\u{2026}"
+            focusStatusAction = .fullDiskAccess
+        } else if Settings.showsFocus && FocusShortcut.isInstalled == false {
+            focusStatusNote?.stringValue = "To switch Focus, JustHide needs its shortcut in "
+                + "Shortcuts. The first time it runs, choose Always Allow."
+            focusStatusButton?.title = "Add Shortcut\u{2026}"
+            focusStatusAction = .shortcut
+        } else if Settings.appleFocusIsOn {
             focusStatusNote?.stringValue = "Apple\u{2019}s own Focus icon is also switched on, so you "
                 + "will see both while icons are revealed. Set Focus to \u{201C}Don\u{2019}t "
                 + "Show\u{201D} under Menu Bar in System Settings to keep only this one."
             focusStatusButton?.title = "Open Menu Bar Settings\u{2026}"
+            focusStatusAction = .menuBarSettings
         } else {
             focusStatusNote?.stringValue = "Apple\u{2019}s own Focus icon is switched off, so this "
                 + "is the only one."
             focusStatusButton?.title = "Open Menu Bar Settings\u{2026}"
+            focusStatusAction = .menuBarSettings
         }
     }
 
@@ -1299,8 +1352,12 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         Settings.focusAppearance = when
     }
 
-    @objc private func focusStatusAction() {
-        openMenuBarSettings()
+    @objc private func focusStatusClicked() {
+        switch focusStatusAction {
+        case .fullDiskAccess: FocusModes.openFullDiskAccessSettings()
+        case .shortcut: FocusShortcut.install()
+        case .menuBarSettings: openMenuBarSettings()
+        }
     }
 
     @objc private func toggleTimeMachine() {
@@ -1321,6 +1378,13 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     @objc private func toggleNowPlaying() {
         Settings.showsNowPlaying = nowPlayingCheckbox?.state == .on
+        reload()
+    }
+
+    @objc private func changeNowPlayingSource() {
+        guard let raw = nowPlayingSourcePopUp?.selectedItem?.representedObject as? String,
+              let source = Settings.NowPlayingSource(rawValue: raw) else { return }
+        Settings.nowPlayingSource = source
         reload()
     }
 

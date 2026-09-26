@@ -29,6 +29,8 @@ jobs:
           set -euo pipefail
           APP=build/JustHide.app
           test -x "$APP/Contents/MacOS/JustHide"
+          test -f "$APP/Contents/Frameworks/NowPlayingHelper.dylib"
+          test -f "$APP/Contents/Resources/JustHide Focus.shortcut"
           test -f "$APP/Contents/Resources/AppIcon.icns"
           # The icon needs BOTH the file and this key, and a missing key is
           # invisible until someone looks at the Dock.

@@ -35,6 +35,8 @@ mkdir -p "$APP/Contents/MacOS"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# The Focus menu's shortcut, committed already signed (tools/make-focus-shortcut.py).
+cp "$ROOT/Resources/JustHide Focus.shortcut" "$APP/Contents/Resources/"
 
 echo "==> Compiling"
 xcrun swiftc \
@@ -45,11 +47,27 @@ xcrun swiftc \
     -o "$APP/Contents/MacOS/JustHide" \
     "$ROOT"/Sources/*.swift
 
+# The Now Playing helper: a library run inside /usr/bin/perl, not linked into
+# JustHide (see Helper/NowPlayingHelper.m for why).
+echo "==> Compiling the Now Playing helper"
+mkdir -p "$APP/Contents/Frameworks"
+xcrun clang \
+    -dynamiclib -fobjc-arc -O2 \
+    -target arm64-apple-macos14.0 \
+    -isysroot "$(xcrun --show-sdk-path --sdk macosx)" \
+    -framework Foundation \
+    -o "$APP/Contents/Frameworks/NowPlayingHelper.dylib" \
+    "$ROOT/Helper/NowPlayingHelper.m"
+
 echo "==> Signing"
+# Nested code first: signing the app seals what is inside it, so the helper
+# has to carry its own signature by then.
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+    codesign --force --options runtime --sign "$IDENTITY" "$APP/Contents/Frameworks/NowPlayingHelper.dylib"
     codesign --force --options runtime --entitlements "$ROOT/Resources/JustHide.entitlements" --sign "$IDENTITY" "$APP"
     echo "    signed with '$IDENTITY' (Accessibility grant persists across rebuilds)"
 else
+    codesign --force --sign - "$APP/Contents/Frameworks/NowPlayingHelper.dylib"
     codesign --force --entitlements "$ROOT/Resources/JustHide.entitlements" --sign - "$APP"
     echo "    ad-hoc signed; no '$IDENTITY' identity found."
     echo "    macOS may re-ask for Accessibility after each rebuild."
