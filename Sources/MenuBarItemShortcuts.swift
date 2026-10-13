@@ -159,6 +159,28 @@ enum MenuBarItemCatalogue {
         return found.sorted { $0.x < $1.x }.map(\.ref)
     }
 
+    /// What one running app has in the bar right now, left to right, with the
+    /// element to press for each -- for the hidden-icons menu, which presses
+    /// what it lists rather than looking it up again by name. Only pressable
+    /// elements, chosen the way MenuBarItemPress chooses them.
+    static func live(pid: pid_t, appName: String) -> [(label: String, element: AXUIElement)] {
+        guard AXIsProcessTrusted(),
+              let extrasRef = copy(AXUIElementCreateApplication(pid), "AXExtrasMenuBar"),
+              CFGetTypeID(extrasRef) == AXUIElementGetTypeID(),
+              let children = copy(extrasRef as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement]
+        else { return [] }
+        var found: [(label: String, element: AXUIElement, x: CGFloat)] = []
+        for child in children {
+            let grandchildren = (copy(child, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+            let inside = grandchildren.filter(MenuBarItemPress.canPress)
+            for element in inside.isEmpty ? [child] : inside where MenuBarItemPress.canPress(element) {
+                found.append((labelFrom(naming(of: element)) ?? appName, element,
+                              frame(of: element)?.minX ?? frame(of: child)?.minX ?? 0))
+            }
+        }
+        return found.sorted { $0.x < $1.x }.map { ($0.label, $0.element) }
+    }
+
     /// Every attribute worth reading, most identifying first. Kept as one list
     /// so discovery and pressing agree about what counts as a name.
     static let namingAttributes = ["AXIdentifier", kAXDescriptionAttribute,
@@ -262,6 +284,18 @@ enum MenuBarItemPress {
         return true
     }
 
+    /// The same for an element already in hand: closes the app's open menu if
+    /// there is one, otherwise presses.
+    static func toggle(element: AXUIElement, pid: pid_t, named name: String) {
+        if isShowing(pid: pid) {
+            sendEscape()
+            Log.controller.log("closed \(name) from the hidden-icons menu")
+            return
+        }
+        AXUIElementPerformAction(element, kAXPressAction as CFString)
+        Log.controller.log("opened \(name) from the hidden-icons menu")
+    }
+
     /// Measured on 27.0: an open status item panel or menu is a window owned by
     /// that app at layer 20 or above (iStat's panel 24, Clop's menu 101), and
     /// there is none while it is closed. Only the owner and the layer are read;
@@ -324,7 +358,7 @@ enum MenuBarItemPress {
         }
     }
 
-    private static func canPress(_ element: AXUIElement) -> Bool {
+    static func canPress(_ element: AXUIElement) -> Bool {
         var actions: CFArray?
         guard AXUIElementCopyActionNames(element, &actions) == .success,
               let names = actions as? [String] else { return false }

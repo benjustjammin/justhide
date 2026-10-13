@@ -2,9 +2,9 @@
 //  PreferencesWindow.swift
 //  JustHide
 //
-//  One window, built in code: a header, the list of hidden apps, the options,
-//  and a plain-English note about the quirks of how hiding works on macOS 27.
-//  No storyboard to keep in sync.
+//  One window, built in code, laid out like System Settings: a sidebar of
+//  topics under headings, each a page of grouped rows with the controls on the
+//  right. No storyboard to keep in sync.
 //
 
 import Cocoa
@@ -15,45 +15,41 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private var table: NSTableView?
-    private var loginCheckbox: NSButton?
-    private var hoverCheckbox: NSButton?
-    private var newAppsCheckbox: NSButton?
-    private var clockCheckbox: NSButton?
+    private var loginCheckbox: NSSwitch?
+    private var loginTitle: NSTextField?
+    private var hoverCheckbox: NSSwitch?
+    private var newAppsCheckbox: NSSwitch?
+    private var clockCheckbox: NSSwitch?
     private var clockNote: NSTextField?
+    private var switchesCheckbox: NSSwitch?
+    private var switchesNote: NSTextField?
     private var glyphPopUp: NSPopUpButton?
-    private var nowPlayingCheckbox: NSButton?
+    private var nowPlayingCheckbox: NSSwitch?
     private var nowPlayingSourcePopUp: NSPopUpButton?
     private var nowPlayingNote: NSTextField?
     private var nowPlayingStylePopUp: NSPopUpButton?
     private var nowPlayingWhenPopUp: NSPopUpButton?
     private var nowPlayingAppleNote: NSTextField?
-    private var focusCheckbox: NSButton?
+    private var focusCheckbox: NSSwitch?
     private var focusWhenPopUp: NSPopUpButton?
     private var focusStatusNote: NSTextField?
     private var focusStatusButton: NSButton?
-    private var timeMachineCheckbox: NSButton?
+    private var timeMachineCheckbox: NSSwitch?
     private var timeMachineWhenPopUp: NSPopUpButton?
     private var autoHidePopUp: NSPopUpButton?
     private var shortcutButton: NSButton?
     private var shortcutClear: NSButton?
     private var quirksNote: NSTextField?
-    private var quirksToggle: NSButton?
-    private var quirksBox: NSView?
-    private var quirksCollapsed: NSLayoutConstraint?
     private var accessRow: NSStackView?
     private var accessNote: NSTextField?
     private var accessButton: NSButton?
     private var accessRestartButton: NSButton?
-    private var accessTop: NSLayoutConstraint?
-    private var accessCollapsed: NSLayoutConstraint?
     private var mechanismRow: NSStackView?
     private var mechanismNote: NSTextField?
     private var mechanismButton: NSButton?
-    private var mechanismTop: NSLayoutConstraint?
-    private var mechanismCollapsed: NSLayoutConstraint?
     private var updateNote: NSTextField?
     private var updateButton: NSButton?
-    private var updatesCheckbox: NSButton?
+    private var updatesCheckbox: NSSwitch?
     private let picker = AppPicker()
 
     /// One line of the list: either an app, or -- indented under an app that
@@ -164,38 +160,105 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     // MARK: - Building
 
+    /// The pages, laid out like System Settings: a sidebar of topics under
+    /// headings, each topic a scrolling page of grouped rows. One long window
+    /// had grown to two columns and past the height of a laptop screen; split
+    /// by topic, every page fits and each setting has an obvious home.
+    enum Pane: String, CaseIterable {
+        case apps, behaviour, nowPlaying, focus, timeMachine, general, about
+
+        var title: String {
+            switch self {
+            case .apps: return "Menu Bar Apps"
+            case .behaviour: return "Behaviour"
+            case .nowPlaying: return "Now Playing"
+            case .focus: return "Focus"
+            case .timeMachine: return "Time Machine"
+            case .general: return "General"
+            case .about: return "About"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .apps: return "menubar.rectangle"
+            case .behaviour: return "eye.slash"
+            case .nowPlaying: return "music.note"
+            case .focus: return "moon.fill"
+            case .timeMachine: return "clock.arrow.circlepath"
+            case .general: return "gearshape"
+            case .about: return "info.circle"
+            }
+        }
+
+        var color: NSColor {
+            switch self {
+            case .apps: return .systemBlue
+            case .behaviour: return .systemIndigo
+            case .nowPlaying: return .systemPink
+            case .focus: return .systemPurple
+            case .timeMachine: return .systemGreen
+            case .general: return .systemGray
+            case .about: return .systemGray
+            }
+        }
+    }
+
+    static let sidebarSections: [(heading: String, panes: [Pane])] = [
+        ("Hiding", [.apps, .behaviour]),
+        ("Extra Icons", [.nowPlaying, .focus, .timeMachine]),
+        ("JustHide", [.general, .about]),
+    ]
+
+    private static let sidebarWidth: CGFloat = 210
+    private static let paneWidth: CGFloat = 600
+    /// A page's margins, and so the width of everything on it.
+    private static let pageMargin: CGFloat = 24
+    private static var groupWidth: CGFloat { paneWidth - 2 * pageMargin }
+    /// Inside a group's padding: what a row's text has to fit in.
+    private static var rowWidth: CGFloat { groupWidth - 24 }
+
+    private var sidebar: SettingsSidebar?
+    private var detail: NSView?
+    private var pages: [Pane: NSView] = [:]
+    private var currentPane: Pane = Pane(rawValue: UserDefaults.standard.string(forKey: "settingsPane") ?? "")
+        ?? .apps
+
     private func build() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.windowWidth, height: 620),
-                              styleMask: [.titled, .closable],
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0,
+                                                  width: Self.sidebarWidth + Self.paneWidth, height: 620),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable,
+                                          .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "JustHide Settings"
         window.delegate = self
         window.isReleasedWhenClosed = false
-
-        let content = NSView()
-        window.contentView = content
+        // An empty unified toolbar gives the tall title bar System Settings has,
+        // with the page's name in it.
+        window.toolbar = NSToolbar(identifier: "JustHideSettings")
+        window.toolbarStyle = .unified
 
         NotificationCenter.default.addObserver(self, selector: #selector(windowBecameActive),
                                                name: NSApplication.didBecomeActiveNotification,
                                                object: nil)
 
-        // ---- Header: icon, name, version
+        // ---- About: icon, name, version, updates
         let iconView = NSImageView(image: NSApp.applicationIconImage)
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        iconView.heightAnchor.constraint(equalToConstant: 72).isActive = true
         let name = label("JustHide", size: 22, bold: true)
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         let subtitle = label("Tidies your menu bar. Version \(version).", secondary: true)
 
         let updateNote = label("", secondary: true)
         updateNote.maximumNumberOfLines = 0
-        // Without this a long line widens the WINDOW instead of wrapping: the
-        // row sits beside the header, so nothing else constrains its width.
-        updateNote.preferredMaxLayoutWidth = 240
+        updateNote.alignment = .center
+        updateNote.preferredMaxLayoutWidth = Self.rowWidth
         self.updateNote = updateNote
         let updateButton = NSButton(title: "Check Now", target: self,
                                     action: #selector(updateAction))
         updateButton.bezelStyle = .rounded
-        updateButton.controlSize = .small
         updateButton.translatesAutoresizingMaskIntoConstraints = false
         self.updateButton = updateButton
         // A plain button rather than a link: a link in a window nobody expects
@@ -203,16 +266,22 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // pointer in the app.
         let githubButton = NSButton(title: "GitHub", target: self, action: #selector(openProjectPage))
         githubButton.bezelStyle = .rounded
-        githubButton.controlSize = .small
         githubButton.translatesAutoresizingMaskIntoConstraints = false
-        let updateRow = NSStackView(views: [updateNote, updateButton, githubButton])
-        updateRow.orientation = .horizontal
-        updateRow.spacing = 8
-        updateRow.translatesAutoresizingMaskIntoConstraints = false
+        let updateButtons = NSStackView(views: [updateButton, githubButton])
+        updateButtons.orientation = .horizontal
+        updateButtons.spacing = 8
+        let aboutHeader = NSStackView(views: [iconView, name, subtitle, updateNote, updateButtons])
+        aboutHeader.orientation = .vertical
+        aboutHeader.alignment = .centerX
+        aboutHeader.spacing = 6
+        aboutHeader.setCustomSpacing(10, after: iconView)
+        aboutHeader.setCustomSpacing(10, after: updateNote)
+        aboutHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        let updatesCheckbox = makeSwitch(#selector(toggleUpdateChecks))
+        self.updatesCheckbox = updatesCheckbox
 
         // ---- Hidden apps
-        let listLabel = label("Menu bar apps", bold: true)
-
         let table = NSTableView()
         table.rowHeight = 24
         table.style = .inset
@@ -244,13 +313,15 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         let scroll = NSScrollView()
         // Sized to its contents, between six and fourteen rows: enough that a
-        // busy menu bar does not scroll straight away, capped so the window
-        // cannot grow without end. reload() sets the constant.
+        // busy menu bar does not scroll straight away, capped so the page
+        // stays readable. reload() sets the constant.
         let listHeight = scroll.heightAnchor.constraint(equalToConstant: 172)
+        listHeight.isActive = true
         self.listHeight = listHeight
         scroll.documentView = table
         scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
         let listButtons = NSSegmentedControl(labels: ["+", "\u{2212}", "\u{21BB}"],
@@ -261,22 +332,29 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         let perAppNote = label(Self.perAppNoteText, secondary: true)
         perAppNote.maximumNumberOfLines = 0
-        perAppNote.preferredMaxLayoutWidth = 520 - 40 - 100
+        perAppNote.preferredMaxLayoutWidth = Self.groupWidth - 110
         self.perAppNote = perAppNote
+        let listFooter = NSStackView(views: [listButtons, perAppNote])
+        listFooter.orientation = .horizontal
+        listFooter.alignment = .top
+        listFooter.spacing = 12
+        listFooter.translatesAutoresizingMaskIntoConstraints = false
 
-        // No Accessibility row. Hiding works without the permission -- it is only
-        // needed to LIST what is in the bar right now -- so a standing orange
-        // warning here was a nag for something that breaks nothing. The ask now
-        // lives in the app picker, which is the one place it makes a difference,
-        // and the list's third button re-reads it.
+        let newAppsCheckbox = makeSwitch(#selector(toggleNewApps))
+        self.newAppsCheckbox = newAppsCheckbox
+        let newAppsNote = label("An app that has never had an icon in the bar is hidden when it "
+                                + "first puts one up, and added to the list above, where unticking "
+                                + "Hidden keeps it visible for good. Needs Accessibility, to see "
+                                + "the icon.", secondary: true)
+        newAppsNote.maximumNumberOfLines = 0
 
-        // ---- Accessibility. Collapsed to nothing unless something the user has
-        // actually switched on needs the permission, so it is never a standing
-        // nag: hiding itself works without it.
+        // ---- Accessibility. Hidden unless something the user has actually
+        // switched on needs the permission, so it is never a standing nag:
+        // hiding itself works without it.
         let accessNote = label("", secondary: true)
         accessNote.textColor = .systemOrange
         accessNote.maximumNumberOfLines = 0
-        accessNote.preferredMaxLayoutWidth = 520 - 40
+        accessNote.preferredMaxLayoutWidth = Self.groupWidth
         self.accessNote = accessNote
         let accessButton = NSButton(title: "Allow\u{2026}", target: self,
                                     action: #selector(allowAccessibility))
@@ -300,13 +378,13 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         accessRow.translatesAutoresizingMaskIntoConstraints = false
         self.accessRow = accessRow
 
-        // ---- How hiding is going. Collapsed to nothing while it is going
-        // fine, which is nearly always -- but when it is not, this is the only
-        // place that explains it and the only way to the other mechanism.
+        // ---- How hiding is going. Hidden while it is going fine, which is
+        // nearly always -- but when it is not, this is the only place that
+        // explains it and the only way to the other mechanism.
         let mechanismNote = label("", secondary: true)
         mechanismNote.textColor = .systemOrange
         mechanismNote.maximumNumberOfLines = 0
-        mechanismNote.preferredMaxLayoutWidth = 520 - 40
+        mechanismNote.preferredMaxLayoutWidth = Self.groupWidth
         self.mechanismNote = mechanismNote
         let mechanismButton = NSButton(title: "", target: self, action: #selector(switchMechanism))
         mechanismButton.bezelStyle = .rounded
@@ -320,49 +398,35 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         mechanismRow.translatesAutoresizingMaskIntoConstraints = false
         self.mechanismRow = mechanismRow
 
-        // ---- Options
-        let optionsLabel = label("Behaviour", bold: true)
-
-        let loginCheckbox = NSButton(checkboxWithTitle: "Open JustHide at login",
-                                     target: self, action: #selector(toggleLogin))
-        loginCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        // ---- Behaviour
+        let loginCheckbox = makeSwitch(#selector(toggleLogin))
         self.loginCheckbox = loginCheckbox
+        let loginTitle = label("Open JustHide at login")
+        self.loginTitle = loginTitle
 
-        let newAppsCheckbox = NSButton(checkboxWithTitle: "Hide new menu bar apps automatically",
-                                       target: self, action: #selector(toggleNewApps))
-        newAppsCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        newAppsCheckbox.toolTip = "An app that has never had an icon in the bar is hidden when it "
-            + "first puts one up, and added to the list above, where unticking Hidden keeps it "
-            + "visible for good. Needs Accessibility, to see the icon."
-        self.newAppsCheckbox = newAppsCheckbox
-
-        let hoverCheckbox = NSButton(checkboxWithTitle: "Reveal on hover in the menu bar",
-                                     target: self, action: #selector(toggleHover))
-        hoverCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        let hoverCheckbox = makeSwitch(#selector(toggleHover))
         self.hoverCheckbox = hoverCheckbox
+        let hoverNote = label("Rest the pointer in the menu bar for half a second to show "
+                              + "hidden icons.", secondary: true)
+        hoverNote.maximumNumberOfLines = 0
 
-        let clockCheckbox = NSButton(checkboxWithTitle: "Clock opens Notification Center",
-                                     target: self, action: #selector(toggleClockClickThrough))
-        clockCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        let clockCheckbox = makeSwitch(#selector(toggleClockClickThrough))
         self.clockCheckbox = clockCheckbox
-
-        // The cost sits under the checkbox rather than only in "Good to know":
+        // The cost sits under the switch rather than only in "Good to know":
         // it is specific to this choice, so it belongs where the choice is made.
         let clockNote = label("macOS blocks Notification Center while icons are hidden. Clicking "
                               + "the clock unhides for a moment so it opens; closing it hides "
                               + "again. Your icons are back while Notification Center is open.",
                               secondary: true)
         clockNote.maximumNumberOfLines = 0
-        clockNote.preferredMaxLayoutWidth = 520 - 40 - 20
         self.clockNote = clockNote
 
-        let updatesCheckbox = NSButton(checkboxWithTitle: "Check GitHub for new versions",
-                                       target: self, action: #selector(toggleUpdateChecks))
-        updatesCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        updatesCheckbox.toolTip = "Once a day, and nothing about you is sent."
-        self.updatesCheckbox = updatesCheckbox
+        let switchesCheckbox = makeSwitch(#selector(toggleMenuBarSwitches))
+        self.switchesCheckbox = switchesCheckbox
+        let switchesNote = label("", secondary: true)
+        switchesNote.maximumNumberOfLines = 0
+        self.switchesNote = switchesNote
 
-        let autoHideLabel = label("Hide again after:")
         let autoHidePopUp = NSPopUpButton()
         for option in Self.autoHideOptions {
             autoHidePopUp.addItem(withTitle: option.label)
@@ -370,13 +434,13 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         autoHidePopUp.target = self
         autoHidePopUp.action = #selector(changeAutoHide)
-        autoHidePopUp.translatesAutoresizingMaskIntoConstraints = false
         self.autoHidePopUp = autoHidePopUp
 
-        let shortcutLabel = label("Keyboard shortcut:")
+        // ---- General
         let shortcutButton = NSButton(title: "None", target: self, action: #selector(recordShortcut))
         shortcutButton.bezelStyle = .rounded
         shortcutButton.translatesAutoresizingMaskIntoConstraints = false
+        shortcutButton.widthAnchor.constraint(equalToConstant: 150).isActive = true
         self.shortcutButton = shortcutButton
         // Same reasoning as the per-icon rows: Escape while recording clears it,
         // which is not something anyone would find on their own.
@@ -388,9 +452,14 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         shortcutClear.contentTintColor = .secondaryLabelColor
         shortcutClear.toolTip = "Remove this shortcut"
         shortcutClear.translatesAutoresizingMaskIntoConstraints = false
+        shortcutClear.widthAnchor.constraint(equalToConstant: 16).isActive = true
         self.shortcutClear = shortcutClear
+        let shortcutControls = NSStackView(views: [shortcutButton, shortcutClear])
+        shortcutControls.orientation = .horizontal
+        shortcutControls.spacing = 6
+        shortcutControls.translatesAutoresizingMaskIntoConstraints = false
+        let shortcutNote = label("Shows or hides your icons from anywhere.", secondary: true)
 
-        let glyphLabel = label("Menu bar symbol:")
         let glyphPopUp = NSPopUpButton()
         for glyph in Settings.Glyph.allCases {
             glyphPopUp.addItem(withTitle: glyph.label)
@@ -398,15 +467,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         glyphPopUp.target = self
         glyphPopUp.action = #selector(changeGlyph)
-        glyphPopUp.translatesAutoresizingMaskIntoConstraints = false
         self.glyphPopUp = glyphPopUp
 
-        // ---- Now Playing. Its own section: it is a feature of its own rather
-        // than a way of hiding, and it has three settings of its own.
-        let nowPlayingLabel = label("Now Playing", bold: true)
-        let nowPlayingCheckbox = NSButton(checkboxWithTitle: "Show Now Playing",
-                                          target: self, action: #selector(toggleNowPlaying))
-        nowPlayingCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        // ---- Now Playing
+        let nowPlayingCheckbox = makeSwitch(#selector(toggleNowPlaying))
         self.nowPlayingCheckbox = nowPlayingCheckbox
         // Worded by applyNowPlayingState, because what it says about
         // permission depends on the source.
@@ -414,7 +478,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         nowPlayingNote.maximumNumberOfLines = 0
         self.nowPlayingNote = nowPlayingNote
 
-        let nowPlayingSourceLabel = label("Follow:")
         let nowPlayingSourcePopUp = NSPopUpButton()
         for (title, source) in [("Any app, like macOS", Settings.NowPlayingSource.everything),
                                 ("Apple Music only", Settings.NowPlayingSource.music)] {
@@ -423,10 +486,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         nowPlayingSourcePopUp.target = self
         nowPlayingSourcePopUp.action = #selector(changeNowPlayingSource)
-        nowPlayingSourcePopUp.translatesAutoresizingMaskIntoConstraints = false
         self.nowPlayingSourcePopUp = nowPlayingSourcePopUp
 
-        let nowPlayingStyleLabel = label("In the menu bar:")
         let nowPlayingStylePopUp = NSPopUpButton()
         for (title, style) in [("Icon", Settings.NowPlayingStyle.icon),
                                ("Icon and song", Settings.NowPlayingStyle.title)] {
@@ -435,10 +496,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         nowPlayingStylePopUp.target = self
         nowPlayingStylePopUp.action = #selector(changeNowPlayingStyle)
-        nowPlayingStylePopUp.translatesAutoresizingMaskIntoConstraints = false
         self.nowPlayingStylePopUp = nowPlayingStylePopUp
 
-        let nowPlayingWhenLabel = label("Show it:")
         let nowPlayingWhenPopUp = NSPopUpButton()
         for (title, when) in [("While playing or paused", Settings.NowPlayingAppearance.whilePlaying),
                               ("Always", Settings.NowPlayingAppearance.always)] {
@@ -447,7 +506,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         nowPlayingWhenPopUp.target = self
         nowPlayingWhenPopUp.action = #selector(changeNowPlayingWhen)
-        nowPlayingWhenPopUp.translatesAutoresizingMaskIntoConstraints = false
         self.nowPlayingWhenPopUp = nowPlayingWhenPopUp
 
         // Apple's own is the user's setting, so this says how it is and opens
@@ -458,15 +516,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         let nowPlayingAppleButton = NSButton(title: "Open Menu Bar Settings\u{2026}", target: self,
                                              action: #selector(openMenuBarSettings))
         nowPlayingAppleButton.bezelStyle = .rounded
-        nowPlayingAppleButton.controlSize = .small
         nowPlayingAppleButton.translatesAutoresizingMaskIntoConstraints = false
 
         // ---- Focus. Built like Now Playing, with one status line and one
-        // button saying whether Apple's own is still on.
-        let focusLabel = label("Focus", bold: true)
-        let focusCheckbox = NSButton(checkboxWithTitle: "Show the current Focus",
-                                     target: self, action: #selector(toggleFocus))
-        focusCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        // button saying what, if anything, still needs doing.
+        let focusCheckbox = makeSwitch(#selector(toggleFocus))
         self.focusCheckbox = focusCheckbox
         let focusNote = label("Unlike Apple\u{2019}s, it stays while icons are hidden, with each "
                               + "Focus\u{2019}s own symbol. Click it to switch Focus. Listing your "
@@ -476,7 +530,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                               + "lets an app do it.", secondary: true)
         focusNote.maximumNumberOfLines = 0
 
-        let focusWhenLabel = label("Show it:")
         let focusWhenPopUp = NSPopUpButton()
         for (title, when) in [("While a Focus is on", Settings.FocusAppearance.whileOn),
                               ("Always", Settings.FocusAppearance.always)] {
@@ -485,7 +538,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         focusWhenPopUp.target = self
         focusWhenPopUp.action = #selector(changeFocusWhen)
-        focusWhenPopUp.translatesAutoresizingMaskIntoConstraints = false
         self.focusWhenPopUp = focusWhenPopUp
 
         let focusStatusNote = label("", secondary: true)
@@ -493,22 +545,17 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         self.focusStatusNote = focusStatusNote
         let focusStatusButton = NSButton(title: "", target: self, action: #selector(focusStatusClicked))
         focusStatusButton.bezelStyle = .rounded
-        focusStatusButton.controlSize = .small
         focusStatusButton.translatesAutoresizingMaskIntoConstraints = false
         self.focusStatusButton = focusStatusButton
 
         // ---- Time Machine. Short: there is no Apple twin to warn about,
         // because turning this on switches Apple's off.
-        let timeMachineLabel = label("Time Machine", bold: true)
-        let timeMachineCheckbox = NSButton(checkboxWithTitle: "Use JustHide\u{2019}s Time Machine icon",
-                                           target: self, action: #selector(toggleTimeMachine))
-        timeMachineCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        let timeMachineCheckbox = makeSwitch(#selector(toggleTimeMachine))
         self.timeMachineCheckbox = timeMachineCheckbox
         let timeMachineNote = label("macOS will not hide Apple\u{2019}s. This switches it off and shows "
                                     + "one that can: backup status, Back Up Now and Browse Backups. "
                                     + "Turning this off puts Apple\u{2019}s back.", secondary: true)
         timeMachineNote.maximumNumberOfLines = 0
-        let timeMachineWhenLabel = label("Show it:")
         let timeMachineWhenPopUp = NSPopUpButton()
         for (title, when) in [("Only while icons are shown", Settings.TimeMachineAppearance.withHidden),
                               ("Always", Settings.TimeMachineAppearance.always)] {
@@ -517,306 +564,98 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         }
         timeMachineWhenPopUp.target = self
         timeMachineWhenPopUp.action = #selector(changeTimeMachineWhen)
-        timeMachineWhenPopUp.translatesAutoresizingMaskIntoConstraints = false
         self.timeMachineWhenPopUp = timeMachineWhenPopUp
 
-        // ---- Quirks, behind a disclosure. In one column this block is the
-        // single biggest thing in the window, and it is reference material: read
-        // once, then in the way. Collapsed by default, and the state sticks.
-        let quirksToggle = NSButton(title: "", target: self, action: #selector(toggleQuirks))
-        quirksToggle.bezelStyle = .disclosure
-        quirksToggle.setButtonType(.onOff)
-        quirksToggle.state = Settings.showsGoodToKnow ? .on : .off
-        quirksToggle.translatesAutoresizingMaskIntoConstraints = false
-        self.quirksToggle = quirksToggle
-        let quirksLabel = label("Good to know", bold: true)
+        // ---- Good to know: reference material, so it lives on About rather
+        // than in the way of the settings.
         let quirks = label(Self.quirksText, secondary: true)
-        quirksNote = quirks
         quirks.maximumNumberOfLines = 0
-        // Without a wrapping width an NSTextField lays out on one line and runs
-        // straight off the window: 520 wide, less the window margins and the
-        // box's own content margins.
-        // Wraps to the box's inner width: window 520, less both window margins
-        // and the box's own padding.
-        quirks.preferredMaxLayoutWidth = 520 - 40 - 24
-        // A plain layer-backed view rather than NSBox: NSBox positions its
-        // contentView by frame, which fights the label's constraints and spilled
-        // the text out above the box.
-        let quirksBox = NSView()
-        quirksBox.wantsLayer = true
-        quirksBox.layer?.backgroundColor = NSColor.quaternarySystemFill.cgColor
-        quirksBox.layer?.borderColor = NSColor.separatorColor.cgColor
-        quirksBox.layer?.borderWidth = 1
-        quirksBox.layer?.cornerRadius = 6
-        quirksBox.translatesAutoresizingMaskIntoConstraints = false
-        quirksBox.addSubview(quirks)
-        self.quirksBox = quirksBox
-        NSLayoutConstraint.activate([
-            quirks.topAnchor.constraint(equalTo: quirksBox.topAnchor, constant: 10),
-            quirks.leadingAnchor.constraint(equalTo: quirksBox.leadingAnchor, constant: 12),
-            quirks.trailingAnchor.constraint(equalTo: quirksBox.trailingAnchor, constant: -12),
-            quirks.bottomAnchor.constraint(equalTo: quirksBox.bottomAnchor, constant: -10),
+        quirks.preferredMaxLayoutWidth = Self.rowWidth
+        quirksNote = quirks
+
+        // ---- The pages
+        pages[.apps] = page([
+            accessRow,
+            header("Apps with menu bar icons"),
+            group([scroll], padded: false),
+            listFooter,
+            group([row("Hide new menu bar apps automatically", note: newAppsNote,
+                       control: newAppsCheckbox)]),
+        ])
+        pages[.behaviour] = page([
+            mechanismRow,
+            group([
+                row("Hide again after", control: autoHidePopUp),
+                row("Reveal on hover in the menu bar", note: hoverNote, control: hoverCheckbox),
+            ]),
+            header("macOS\u{2019}s own icons"),
+            group([
+                row("Keep the camera button and Live Activities", note: switchesNote,
+                    control: switchesCheckbox),
+                row("Clock opens Notification Center", note: clockNote, control: clockCheckbox),
+            ]),
+        ])
+        pages[.nowPlaying] = page([
+            group([
+                row("Show Now Playing", note: nowPlayingNote, control: nowPlayingCheckbox),
+                row("Follow", control: nowPlayingSourcePopUp),
+                row("In the menu bar", control: nowPlayingStylePopUp),
+                row("Show it", control: nowPlayingWhenPopUp),
+            ]),
+            group([row(note: nowPlayingAppleNote, control: nowPlayingAppleButton)]),
+        ])
+        pages[.focus] = page([
+            group([
+                row("Show the current Focus", note: focusNote, control: focusCheckbox),
+                row("Show it", control: focusWhenPopUp),
+            ]),
+            group([row(note: focusStatusNote, control: focusStatusButton)]),
+        ])
+        pages[.timeMachine] = page([
+            group([
+                row("Use JustHide\u{2019}s Time Machine icon", note: timeMachineNote,
+                    control: timeMachineCheckbox),
+                row("Show it", control: timeMachineWhenPopUp),
+            ]),
+        ])
+        pages[.general] = page([
+            group([
+                row(title: loginTitle, control: loginCheckbox),
+                row("Keyboard shortcut", note: shortcutNote, control: shortcutControls,
+                    controlWidth: 172),
+                row("Menu bar symbol", control: glyphPopUp),
+            ]),
+        ])
+        pages[.about] = page([
+            aboutHeader,
+            group([row("Check GitHub for new versions",
+                       note: label("Once a day, and nothing about you is sent.", secondary: true),
+                       control: updatesCheckbox)]),
+            header("Good to know"),
+            group([padded(quirks)]),
         ])
 
-        for view in [iconView, name, subtitle, updateRow, listLabel, scroll, listButtons, perAppNote,
-                     quirksToggle,
-                     accessRow, mechanismRow, optionsLabel,
-                     loginCheckbox, newAppsCheckbox, hoverCheckbox, clockCheckbox, clockNote,
-                     updatesCheckbox, autoHideLabel, autoHidePopUp,
-                     shortcutLabel, shortcutButton, shortcutClear, glyphLabel, glyphPopUp,
-                     nowPlayingLabel, nowPlayingCheckbox, nowPlayingNote,
-                     nowPlayingSourceLabel, nowPlayingSourcePopUp,
-                     nowPlayingStyleLabel, nowPlayingStylePopUp, nowPlayingWhenLabel,
-                     nowPlayingWhenPopUp, nowPlayingAppleNote, nowPlayingAppleButton,
-                     focusLabel, focusCheckbox, focusNote, focusWhenLabel, focusWhenPopUp,
-                     focusStatusNote, focusStatusButton,
-                     timeMachineLabel, timeMachineCheckbox, timeMachineNote,
-                     timeMachineWhenLabel, timeMachineWhenPopUp,
-                     quirksLabel, quirksBox] {
-            content.addSubview(view)
-        }
+        // ---- Sidebar and the page beside it
+        let sidebar = SettingsSidebar(sections: Self.sidebarSections)
+        sidebar.onSelect = { [weak self] pane in self?.select(pane) }
+        self.sidebar = sidebar
+        let sidebarController = NSViewController()
+        sidebarController.view = sidebar.view
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarController)
+        sidebarItem.canCollapse = false
+        sidebarItem.minimumThickness = Self.sidebarWidth
+        sidebarItem.maximumThickness = Self.sidebarWidth
 
-        // ---- Layout
-        //
-        // The hiding settings are one column, 700pt wide rather than the
-        // original 520: prose that wrapped to four lines at 520 takes two, and
-        // the pop-ups sit beside their labels. An earlier two-column version was
-        // rejected because it split HIDING across two panes. This one splits by
-        // topic instead: Now Playing and Focus, the items JustHide adds to the
-        // bar, go in a column of their own on the right, since in one column
-        // the window had grown taller than a laptop screen.
-        let margin: CGFloat = 20
-        let leftWidth = Self.leftColumnWidth
-        let windowWidth = Self.windowWidth
-        let controlColumn = content.leadingAnchor
-        // The right column holds the two items JustHide adds to the bar, Now
-        // Playing and Focus: things it SHOWS, beside the things it hides. A
-        // second column rather than more height, because one column had
-        // grown past the height of a laptop screen.
-        let rightColumn = content.leadingAnchor
-        let rightInset = leftWidth + margin
-        let rightInner = windowWidth - leftWidth - 2 * margin
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(divider)
+        let detail = NSView()
+        self.detail = detail
+        let detailController = NSViewController()
+        detailController.view = detail
+        detail.widthAnchor.constraint(equalToConstant: Self.paneWidth).isActive = true
+        let split = NSSplitViewController()
+        split.addSplitViewItem(sidebarItem)
+        split.addSplitViewItem(NSSplitViewItem(viewController: detailController))
+        window.contentViewController = split
 
-        perAppNote.preferredMaxLayoutWidth = leftWidth - 2 * margin - 120
-        clockNote.preferredMaxLayoutWidth = leftWidth - 2 * margin - 18
-        nowPlayingNote.preferredMaxLayoutWidth = rightInner - 18
-        nowPlayingAppleNote.preferredMaxLayoutWidth = rightInner
-        focusNote.preferredMaxLayoutWidth = rightInner - 18
-        focusStatusNote.preferredMaxLayoutWidth = rightInner
-        timeMachineNote.preferredMaxLayoutWidth = rightInner - 18
-        quirks.preferredMaxLayoutWidth = leftWidth - 2 * margin - 24
-
-        NSLayoutConstraint.activate([
-            iconView.topAnchor.constraint(equalTo: content.topAnchor, constant: margin),
-            iconView.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            iconView.widthAnchor.constraint(equalToConstant: 56),
-            iconView.heightAnchor.constraint(equalToConstant: 56),
-
-            name.topAnchor.constraint(equalTo: iconView.topAnchor, constant: 4),
-            name.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
-            subtitle.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 2),
-            subtitle.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-
-            updateRow.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 8),
-            updateRow.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            updateRow.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor,
-                                                constant: -margin),
-
-            // Notices under the header: a warning is worth seeing first, and one
-            // anchor chain is much easier to collapse than something buried
-            // mid-window.
-            accessRow.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            accessRow.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-            mechanismRow.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            mechanismRow.trailingAnchor.constraint(equalTo: content.trailingAnchor,
-                                                   constant: -margin),
-
-            // ---- The list
-            listLabel.topAnchor.constraint(equalTo: mechanismRow.bottomAnchor, constant: 16),
-            listLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-
-            scroll.topAnchor.constraint(equalTo: listLabel.bottomAnchor, constant: 6),
-            scroll.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            scroll.trailingAnchor.constraint(equalTo: controlColumn, constant: leftWidth - margin),
-            listHeight,
-
-            listButtons.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 6),
-            listButtons.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
-            listButtons.widthAnchor.constraint(equalToConstant: 108),
-
-            // Back beside the buttons rather than under them: there is width for
-            // it now, and it saves a line.
-            perAppNote.centerYAnchor.constraint(equalTo: listButtons.centerYAnchor),
-            perAppNote.leadingAnchor.constraint(equalTo: listButtons.trailingAnchor, constant: 12),
-            perAppNote.trailingAnchor.constraint(lessThanOrEqualTo: controlColumn,
-                                                 constant: leftWidth - margin),
-
-            // ---- The options
-            optionsLabel.topAnchor.constraint(equalTo: listButtons.bottomAnchor, constant: 18),
-            optionsLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-
-            loginCheckbox.topAnchor.constraint(equalTo: optionsLabel.bottomAnchor, constant: 8),
-            loginCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
-
-            newAppsCheckbox.topAnchor.constraint(equalTo: loginCheckbox.bottomAnchor, constant: 6),
-            newAppsCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
-
-            hoverCheckbox.topAnchor.constraint(equalTo: newAppsCheckbox.bottomAnchor, constant: 6),
-            hoverCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
-
-            clockCheckbox.topAnchor.constraint(equalTo: hoverCheckbox.bottomAnchor, constant: 6),
-            clockCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
-
-            // Indented to the checkbox's text, so it reads as that option's
-            // small print rather than as another setting.
-            clockNote.topAnchor.constraint(equalTo: clockCheckbox.bottomAnchor, constant: 2),
-            clockNote.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor, constant: 18),
-            clockNote.trailingAnchor.constraint(equalTo: controlColumn, constant: leftWidth - margin),
-
-            updatesCheckbox.topAnchor.constraint(equalTo: clockNote.bottomAnchor, constant: 8),
-            updatesCheckbox.leadingAnchor.constraint(equalTo: optionsLabel.leadingAnchor),
-
-            autoHideLabel.topAnchor.constraint(equalTo: updatesCheckbox.bottomAnchor, constant: 14),
-            autoHideLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            autoHidePopUp.centerYAnchor.constraint(equalTo: autoHideLabel.centerYAnchor),
-            autoHidePopUp.leadingAnchor.constraint(equalTo: controlColumn, constant: 170),
-            autoHidePopUp.widthAnchor.constraint(equalToConstant: 220),
-
-            shortcutLabel.topAnchor.constraint(equalTo: autoHideLabel.bottomAnchor, constant: 14),
-            shortcutLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            shortcutButton.centerYAnchor.constraint(equalTo: shortcutLabel.centerYAnchor),
-            shortcutButton.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
-            shortcutButton.widthAnchor.constraint(equalToConstant: 220),
-            shortcutClear.leadingAnchor.constraint(equalTo: shortcutButton.trailingAnchor,
-                                                   constant: 6),
-            shortcutClear.centerYAnchor.constraint(equalTo: shortcutButton.centerYAnchor),
-            shortcutClear.widthAnchor.constraint(equalToConstant: 16),
-
-            glyphLabel.topAnchor.constraint(equalTo: shortcutLabel.bottomAnchor, constant: 14),
-            glyphLabel.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            glyphPopUp.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
-            glyphPopUp.leadingAnchor.constraint(equalTo: autoHidePopUp.leadingAnchor),
-            glyphPopUp.widthAnchor.constraint(equalToConstant: 220),
-
-            // ---- The right column, level with the list
-            divider.topAnchor.constraint(equalTo: listLabel.topAnchor),
-            divider.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -margin),
-            divider.leadingAnchor.constraint(equalTo: controlColumn, constant: leftWidth),
-            divider.widthAnchor.constraint(equalToConstant: 1),
-
-            // ---- Now Playing
-            nowPlayingLabel.topAnchor.constraint(equalTo: listLabel.topAnchor),
-            nowPlayingLabel.leadingAnchor.constraint(equalTo: rightColumn, constant: rightInset),
-
-            nowPlayingCheckbox.topAnchor.constraint(equalTo: nowPlayingLabel.bottomAnchor, constant: 8),
-            nowPlayingCheckbox.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-
-            nowPlayingNote.topAnchor.constraint(equalTo: nowPlayingCheckbox.bottomAnchor, constant: 2),
-            nowPlayingNote.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 18),
-            nowPlayingNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            nowPlayingSourceLabel.topAnchor.constraint(equalTo: nowPlayingNote.bottomAnchor, constant: 12),
-            nowPlayingSourceLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-            nowPlayingSourcePopUp.centerYAnchor.constraint(equalTo: nowPlayingSourceLabel.centerYAnchor),
-            nowPlayingSourcePopUp.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor, constant: 120),
-            nowPlayingSourcePopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            nowPlayingStyleLabel.topAnchor.constraint(equalTo: nowPlayingSourceLabel.bottomAnchor, constant: 14),
-            nowPlayingStyleLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-            nowPlayingStylePopUp.centerYAnchor.constraint(equalTo: nowPlayingStyleLabel.centerYAnchor),
-            nowPlayingStylePopUp.leadingAnchor.constraint(equalTo: nowPlayingSourcePopUp.leadingAnchor),
-            nowPlayingStylePopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            nowPlayingWhenLabel.topAnchor.constraint(equalTo: nowPlayingStyleLabel.bottomAnchor, constant: 14),
-            nowPlayingWhenLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-            nowPlayingWhenPopUp.centerYAnchor.constraint(equalTo: nowPlayingWhenLabel.centerYAnchor),
-            nowPlayingWhenPopUp.leadingAnchor.constraint(equalTo: nowPlayingStylePopUp.leadingAnchor),
-            nowPlayingWhenPopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            nowPlayingAppleNote.topAnchor.constraint(equalTo: nowPlayingWhenLabel.bottomAnchor, constant: 12),
-            nowPlayingAppleNote.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-            nowPlayingAppleNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-            nowPlayingAppleButton.topAnchor.constraint(equalTo: nowPlayingAppleNote.bottomAnchor, constant: 6),
-            nowPlayingAppleButton.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-
-            // ---- Focus
-            focusLabel.topAnchor.constraint(equalTo: nowPlayingAppleButton.bottomAnchor, constant: 22),
-            focusLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-
-            focusCheckbox.topAnchor.constraint(equalTo: focusLabel.bottomAnchor, constant: 8),
-            focusCheckbox.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
-
-            focusNote.topAnchor.constraint(equalTo: focusCheckbox.bottomAnchor, constant: 2),
-            focusNote.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor, constant: 18),
-            focusNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            focusWhenLabel.topAnchor.constraint(equalTo: focusNote.bottomAnchor, constant: 12),
-            focusWhenLabel.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
-            focusWhenPopUp.centerYAnchor.constraint(equalTo: focusWhenLabel.centerYAnchor),
-            focusWhenPopUp.leadingAnchor.constraint(equalTo: nowPlayingStylePopUp.leadingAnchor),
-            focusWhenPopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            focusStatusNote.topAnchor.constraint(equalTo: focusWhenLabel.bottomAnchor, constant: 12),
-            focusStatusNote.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
-            focusStatusNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-            focusStatusButton.topAnchor.constraint(equalTo: focusStatusNote.bottomAnchor, constant: 6),
-            focusStatusButton.leadingAnchor.constraint(equalTo: focusLabel.leadingAnchor),
-
-            // ---- Time Machine
-            timeMachineLabel.topAnchor.constraint(equalTo: focusStatusButton.bottomAnchor, constant: 22),
-            timeMachineLabel.leadingAnchor.constraint(equalTo: nowPlayingLabel.leadingAnchor),
-
-            timeMachineCheckbox.topAnchor.constraint(equalTo: timeMachineLabel.bottomAnchor, constant: 8),
-            timeMachineCheckbox.leadingAnchor.constraint(equalTo: timeMachineLabel.leadingAnchor),
-
-            timeMachineNote.topAnchor.constraint(equalTo: timeMachineCheckbox.bottomAnchor, constant: 2),
-            timeMachineNote.leadingAnchor.constraint(equalTo: timeMachineLabel.leadingAnchor, constant: 18),
-            timeMachineNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-
-            timeMachineWhenLabel.topAnchor.constraint(equalTo: timeMachineNote.bottomAnchor, constant: 12),
-            timeMachineWhenLabel.leadingAnchor.constraint(equalTo: timeMachineLabel.leadingAnchor),
-            timeMachineWhenPopUp.centerYAnchor.constraint(equalTo: timeMachineWhenLabel.centerYAnchor),
-            timeMachineWhenPopUp.leadingAnchor.constraint(equalTo: nowPlayingStylePopUp.leadingAnchor),
-            timeMachineWhenPopUp.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
-            // The window grows to whichever column is taller.
-            timeMachineWhenLabel.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor,
-                                                         constant: -margin),
-
-            // ---- The notes, behind their triangle
-            quirksToggle.topAnchor.constraint(equalTo: glyphLabel.bottomAnchor, constant: 18),
-            quirksToggle.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            quirksLabel.centerYAnchor.constraint(equalTo: quirksToggle.centerYAnchor),
-            quirksLabel.leadingAnchor.constraint(equalTo: quirksToggle.trailingAnchor, constant: 4),
-
-            quirksBox.topAnchor.constraint(equalTo: quirksToggle.bottomAnchor, constant: 6),
-            quirksBox.leadingAnchor.constraint(equalTo: controlColumn, constant: margin),
-            quirksBox.trailingAnchor.constraint(equalTo: controlColumn, constant: leftWidth - margin),
-            quirksBox.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor,
-                                              constant: -margin),
-        ])
-
-        self.quirksCollapsed = quirksBox.heightAnchor.constraint(equalToConstant: 0)
-
-        // The mechanism row's height is its content, not a constant: the note
-        // wraps to however many lines it needs. Only the collapsed state is a
-        // fixed height, so that constraint is the one switched on and off.
-        let accessTop = accessRow.topAnchor.constraint(equalTo: updateRow.bottomAnchor,
-                                                       constant: 0)
-        accessTop.isActive = true
-        self.accessTop = accessTop
-        self.accessCollapsed = accessRow.heightAnchor.constraint(equalToConstant: 0)
-
-        let mechanismTop = mechanismRow.topAnchor.constraint(equalTo: accessRow.bottomAnchor,
-                                                             constant: 12)
-        mechanismTop.isActive = true
-        self.mechanismTop = mechanismTop
-        self.mechanismCollapsed = mechanismRow.heightAnchor.constraint(equalToConstant: 0)
-
-        applyQuirksState()
         applyAccessibilityState()
         applyMechanismState()
         applyUpdateState()
@@ -826,45 +665,237 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(updateChanged),
                                                name: .justHideUpdateChanged, object: nil)
 
-        // Fit the window to the content rather than to a guessed height.
-        content.layoutSubtreeIfNeeded()
-        let needed = content.fittingSize
-        window.setContentSize(NSSize(width: Self.windowWidth, height: max(needed.height + margin, 480)))
+        // Fixed width, as System Settings is; the height is the user's, and
+        // each page scrolls when it needs more.
+        let height = min(640, (NSScreen.main?.visibleFrame.height ?? 800) - 80)
+        window.setContentSize(NSSize(width: Self.sidebarWidth + Self.paneWidth, height: height))
+        window.contentMinSize = NSSize(width: Self.sidebarWidth + Self.paneWidth, height: 420)
+        window.contentMaxSize = NSSize(width: Self.sidebarWidth + Self.paneWidth, height: 4000)
 
         self.window = window
+        select(currentPane)
     }
 
-    /// The original single column, and the right-hand one for the items
-    /// JustHide adds to the bar.
-    private static let leftColumnWidth: CGFloat = 700
-    private static let windowWidth: CGFloat = 1080
+    /// Shows one page, from the sidebar or from code.
+    func select(_ pane: Pane) {
+        currentPane = pane
+        UserDefaults.standard.set(pane.rawValue, forKey: "settingsPane")
+        sidebar?.select(pane)
+        window?.title = pane.title
+        guard let detail = detail, let page = pages[pane] else { return }
+        detail.subviews.forEach { $0.removeFromSuperview() }
+        detail.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: detail.topAnchor),
+            page.bottomAnchor.constraint(equalTo: detail.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
+        ])
+    }
+
+    // MARK: - Form pieces
+
+    private func makeSwitch(_ action: Selector) -> NSSwitch {
+        let toggle = NSSwitch()
+        toggle.controlSize = .small
+        toggle.target = self
+        toggle.action = action
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        return toggle
+    }
+
+    /// A page: its views stacked from the top, scrolling when they run long.
+    private func page(_ views: [NSView]) -> NSView {
+        let stack = NSStackView(views: views)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: Self.pageMargin, bottom: 24, right: Self.pageMargin)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for view in views where !(view is NSTextField) {
+            view.widthAnchor.constraint(equalToConstant: Self.groupWidth).isActive = true
+        }
+        // A header sits close to the group it names.
+        for (index, view) in views.enumerated() where view is NSTextField && index + 1 < views.count {
+            stack.setCustomSpacing(6, after: view)
+        }
+
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: document.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+        ])
+
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+        return scroll
+    }
+
+    /// The small heading over a group.
+    private func header(_ text: String) -> NSTextField {
+        let field = label(text, bold: true)
+        field.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        return field
+    }
+
+    /// A rounded box of rows with hairlines between them, as in System Settings.
+    private func group(_ rows: [NSView], padded: Bool = true) -> NSView {
+        let box = GroupBox()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let line = NSBox()
+                line.boxType = .separator
+                line.translatesAutoresizingMaskIntoConstraints = false
+                stack.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+                stack.setCustomSpacing(0, after: line)
+                line.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 12).isActive = true
+            }
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        box.addSubview(stack)
+        let inset: CGFloat = padded ? 0 : 1
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: box.topAnchor, constant: inset),
+            stack.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -inset),
+            stack.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: inset),
+            stack.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -inset),
+        ])
+        return box
+    }
+
+    /// One setting: its name, an optional note under it, the control on the right.
+    private func row(_ title: String? = nil, title titleField: NSTextField? = nil,
+                     note: NSTextField? = nil, control: NSView?,
+                     controlWidth: CGFloat? = nil) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        var texts: [NSView] = []
+        if let field = titleField ?? title.map({ label($0) }) { texts.append(field) }
+        if let note = note { texts.append(note) }
+        let text = NSStackView(views: texts)
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 3
+        text.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(text)
+
+        // The row is as tall as its text or its control, whichever needs more:
+        // both keep a margin for certain, the text's exact margin gives way.
+        let snugTop = text.topAnchor.constraint(equalTo: row.topAnchor, constant: 10)
+        let snugBottom = text.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -10)
+        snugTop.priority = .defaultLow
+        snugBottom.priority = .defaultLow
+        var constraints = [
+            text.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            text.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 10),
+            text.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -10),
+            text.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            snugTop, snugBottom,
+        ]
+        var width = Self.rowWidth
+        if let control = control {
+            control.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(control)
+            let wanted: CGFloat = controlWidth
+                ?? (control is NSPopUpButton ? 210 : control.fittingSize.width)
+            if control is NSPopUpButton {
+                constraints.append(control.widthAnchor.constraint(equalToConstant: wanted))
+            }
+            constraints += [
+                control.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+                control.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 7),
+                control.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -7),
+                text.trailingAnchor.constraint(lessThanOrEqualTo: control.leadingAnchor, constant: -16),
+            ]
+            // A few points spare: a note wrapped a hair too wide is clipped,
+            // not re-wrapped, and loses its last line.
+            width -= wanted + 16 + 6
+        } else {
+            constraints.append(text.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor,
+                                                              constant: -12))
+        }
+        note?.preferredMaxLayoutWidth = width
+        titleField?.preferredMaxLayoutWidth = width
+        NSLayoutConstraint.activate(constraints)
+        return row
+    }
+
+    /// Anything that is not a setting, with a row's padding round it.
+    private func padded(_ view: NSView) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        view.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
+            view.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -10),
+            view.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            view.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -12),
+        ])
+        return row
+    }
 
     /// Written for someone who did not implement it: what is surprising, and why.
     private static var quirksText: String {
         // Kept tight on purpose: this sits in a column, and a wall of text is
         // one nobody reads.
+        let switches = Settings.hidesWithMenuBarSwitches
         var notes = [
             "• Hiding works per app, not per icon \u{2014} an app with several icons hides "
             + "all of them together.",
             "• Position means nothing here: a hidden icon is not moved aside, it is not "
             + "drawn at all. macOS places each icon and remembers it per app, so one can "
             + "sit either side of the JustHide symbol. \u{2318}-drag to rearrange.",
+            "• Right-click the JustHide symbol, or \u{2325}-click it, to open any hidden icon "
+            + "from its menu without showing the rest.",
             "• A shortcut opens an icon\u{2019}s own menu in place without unhiding it; press "
             + "again to close. Needs Accessibility, and the app must be running.",
-            "• While anything is hidden, macOS also hides its own Now Playing and Focus "
-            + "icons. JustHide\u{2019}s own versions stay; to avoid seeing two of each while "
-            + "icons are revealed, set Apple\u{2019}s to \u{201C}Don\u{2019}t Show\u{201D} under "
-            + "Menu Bar in System Settings. JustHide\u{2019}s Focus switches modes through its "
-            + "\u{201C}JustHide Focus\u{201D} shortcut, so keep that in Shortcuts.",
         ]
-        if Settings.clockClickThrough {
+        if switches {
+            notes.append("• Hidden apps are switched off under Menu Bar in System Settings while "
+                         + "they are hidden, and back on when shown or when JustHide quits. If an "
+                         + "app Control Center has not seen yet is hidden, JustHide hides it the "
+                         + "usual way, and macOS\u{2019}s own icons go with it until it has.")
+        } else {
+            notes.append("• While anything is hidden, macOS also hides its own Now Playing and Focus "
+                         + "icons. JustHide\u{2019}s own versions stay; to avoid seeing two of each while "
+                         + "icons are revealed, set Apple\u{2019}s to \u{201C}Don\u{2019}t Show\u{201D} under "
+                         + "Menu Bar in System Settings. JustHide\u{2019}s Focus switches modes through its "
+                         + "\u{201C}JustHide Focus\u{201D} shortcut, so keep that in Shortcuts.")
+        }
+        if switches {
+            // Nothing to say about the clock: no assertion, nothing blocked.
+        } else if Settings.clockClickThrough {
             notes.append("• Clicking the clock unhides briefly so Notification Center opens, "
                          + "and hides again when you close it \u{2014} macOS will not open it "
                          + "while icons are hidden.")
         } else {
             notes.append("• While icons are hidden, clicking the clock will not open "
                          + "Notification Center. Swipe in from the right edge, or turn on the "
-                         + "clock option above.")
+                         + "clock option in Behaviour.")
         }
         if Mechanism.current == .concealment {
             notes.append("• Hiding uses an undocumented part of macOS 27. If an update takes it "
@@ -934,14 +965,15 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         rows = buildRows()
         lastItemSignature = itemSignature()
         table?.reloadData()
-        let wanted = min(max(rows.count, 6), 14) * 24 + 8
+        // Rows plus the column headers.
+        let wanted = min(max(rows.count, 6), 14) * 24 + 8 + 28
         if listHeight?.constant != CGFloat(wanted) {
             listHeight?.constant = CGFloat(wanted)
             fitWindow()
         }
 
         loginCheckbox?.state = LaunchAtLogin.isEnabled ? .on : .off
-        loginCheckbox?.title = LaunchAtLogin.needsApproval
+        loginTitle?.stringValue = LaunchAtLogin.needsApproval
             ? "Open JustHide at login (approve it in System Settings)"
             : "Open JustHide at login"
         hoverCheckbox?.state = Settings.hoverToReveal ? .on : .off
@@ -978,10 +1010,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
             ? (AXIsProcessTrusted() ? nil : "Needs the Accessibility permission, to find the clock.")
             : "Not available while JustHide is using its older method."
         clockNote?.textColor = clockAvailable ? .secondaryLabelColor : .tertiaryLabelColor
+        applySwitchesState()
 
         // The notes depend on the chosen symbol, so they are rebuilt here.
         quirksNote?.stringValue = Self.quirksText
-        applyQuirksState()
         applyAccessibilityState()
         applyMechanismState()
         applyUpdateState()
@@ -1047,9 +1079,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         NSWorkspace.shared.open(UpdateCheck.projectPage)
     }
 
-    @objc private func toggleUpdateChecks(_ sender: NSButton) {
-        Settings.checksForUpdates = sender.state == .on
-        if sender.state == .on { UpdateCheck.checkIfDue(force: true) }
+    @objc private func toggleUpdateChecks() {
+        let on = updatesCheckbox?.state == .on
+        Settings.checksForUpdates = on
+        if on { UpdateCheck.checkIfDue(force: true) }
         applyUpdateState()
     }
 
@@ -1105,9 +1138,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         guard let warning = accessibilityWarning() else {
             accessRow?.isHidden = true
             accessNote?.stringValue = ""
-            accessCollapsed?.isActive = true
-            accessTop?.constant = 0
-            fitWindow()
             return
         }
         accessNote?.stringValue = warning
@@ -1117,9 +1147,6 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // only on the second visit.
         accessRestartButton?.isHidden = !AccessibilityAccess.hasBeenAsked
         accessRow?.isHidden = false
-        accessCollapsed?.isActive = false
-        accessTop?.constant = 12
-        fitWindow()
     }
 
     @objc private func allowAccessibility() {
@@ -1135,26 +1162,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         AccessibilityAccess.restart()
     }
 
-    @objc private func toggleQuirks() {
-        Settings.showsGoodToKnow = quirksToggle?.state == .on
-        applyQuirksState()
-    }
-
-    private func applyQuirksState() {
-        let shown = Settings.showsGoodToKnow
-        quirksToggle?.state = shown ? .on : .off
-        quirksBox?.isHidden = !shown
-        quirksCollapsed?.isActive = !shown
-        fitWindow()
-    }
-
     private func applyMechanismState() {
         guard let state = mechanismState() else {
             mechanismRow?.isHidden = true
             mechanismNote?.stringValue = ""
-            mechanismCollapsed?.isActive = true
-            mechanismTop?.constant = 0
-            fitWindow()
             return
         }
         mechanismNote?.stringValue = state.text
@@ -1164,20 +1175,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         mechanismButton?.isEnabled = Mechanism.current == .width
             ? AssessmentMode.isAvailable : true
         mechanismRow?.isHidden = false
-        mechanismCollapsed?.isActive = false
-        mechanismTop?.constant = 12
-        fitWindow()
     }
 
-    /// Re-fits the window to its content, for a notice that appears or goes away
-    /// while the window is open. Does nothing during build(), which sizes the
-    /// window itself once everything is in place.
-    private func fitWindow() {
-        guard let window = window, let content = window.contentView else { return }
-        content.layoutSubtreeIfNeeded()
-        let needed = content.fittingSize
-        window.setContentSize(NSSize(width: Self.windowWidth, height: max(needed.height + 20, 480)))
-    }
+    /// Pages scroll and the window keeps the size it was given, so there is
+    /// nothing to fit any more; kept so the many callers need not change.
+    private func fitWindow() {}
 
     @objc private func mechanismChanged() {
         guard window != nil else { return }
@@ -1272,6 +1274,41 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         Settings.clockClickThrough = clockCheckbox?.state == .on
         // The "Good to know" note about the dead clock is only true while this
         // is off, so rebuild it.
+        reload()
+    }
+
+    /// The cost, and any trouble, under the checkbox -- like the clock's.
+    private func applySwitchesState() {
+        let on = Settings.hidesWithMenuBarSwitches
+        let available = Mechanism.current == .concealment
+        switchesCheckbox?.state = on ? .on : .off
+        switchesCheckbox?.isEnabled = available
+        switchesCheckbox?.toolTip = available ? nil : "Not available while JustHide is using its older method."
+        var text = "Hides apps by switching them off under Menu Bar in System Settings, so macOS "
+            + "keeps its own icons: the camera button, Live Activities, Focus and Now Playing, and "
+            + "the clock opens Notification Center. Apps slide out rather than vanish. Needs one "
+            + "file picked, once."
+        if on, let problem = MenuBarSwitches.problem {
+            text = problem + " Hiding the usual way until then."
+        }
+        switchesNote?.stringValue = text
+        switchesNote?.textColor = !available ? .tertiaryLabelColor
+            : (on && MenuBarSwitches.problem != nil ? .systemRed : .secondaryLabelColor)
+    }
+
+    @objc private func toggleMenuBarSwitches() {
+        if switchesCheckbox?.state == .on {
+            guard MenuBarSwitches.isGranted || MenuBarSwitches.grant() else {
+                switchesCheckbox?.state = .off
+                return
+            }
+            Settings.hidesWithMenuBarSwitches = true
+        } else {
+            // The controller switches everything back on as it hands over to
+            // the assertion; the grant is kept, so turning it on again does not
+            // ask a second time.
+            Settings.hidesWithMenuBarSwitches = false
+        }
         reload()
     }
 
@@ -1757,5 +1794,143 @@ extension PreferencesWindow: NSTableViewDataSource, NSTableViewDelegate {
             expandedBundleIDs.insert(bundleID)
         }
         reload()
+    }
+}
+
+// MARK: - Window furniture
+
+/// So a page's stack starts at the top of its scroll view.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// The rounded box System Settings puts each set of rows in. Its colours are
+/// set in updateLayer, so they follow a switch between light and dark.
+private final class GroupBox: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.quaternarySystemFill.cgColor
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.borderWidth = 0.5
+    }
+}
+
+/// The sidebar: headings, and under each the pages it covers, each with a
+/// coloured icon in the System Settings manner.
+final class SettingsSidebar: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    private enum Entry {
+        case heading(String)
+        case pane(PreferencesWindow.Pane)
+    }
+
+    let view = NSScrollView()
+    var onSelect: ((PreferencesWindow.Pane) -> Void)?
+
+    private let entries: [Entry]
+    private let table = NSTableView()
+    /// Set while selecting from code, so that is not mistaken for a click.
+    private var selecting = false
+
+    init(sections: [(heading: String, panes: [PreferencesWindow.Pane])]) {
+        entries = sections.flatMap { [Entry.heading($0.heading)] + $0.panes.map(Entry.pane) }
+        super.init()
+        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("pane")))
+        table.headerView = nil
+        table.style = .sourceList
+        table.backgroundColor = .clear
+        table.dataSource = self
+        table.delegate = self
+        view.documentView = table
+        view.drawsBackground = false
+        view.hasVerticalScroller = false
+    }
+
+    func select(_ pane: PreferencesWindow.Pane) {
+        guard let index = entries.firstIndex(where: {
+            if case let .pane(candidate) = $0 { return candidate == pane }
+            return false
+        }) else { return }
+        selecting = true
+        table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        selecting = false
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        if case .heading = entries[row] { return true }
+        return false
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        if case .pane = entries[row] { return true }
+        return false
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if case .heading = entries[row] { return 26 }
+        return 30
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let cell = NSTableCellView()
+        let text = NSTextField(labelWithString: "")
+        text.translatesAutoresizingMaskIntoConstraints = false
+        text.lineBreakMode = .byTruncatingTail
+        cell.addSubview(text)
+        cell.textField = text
+
+        switch entries[row] {
+        case let .heading(title):
+            text.stringValue = title
+            text.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            text.textColor = .secondaryLabelColor
+            NSLayoutConstraint.activate([
+                text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                text.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -3),
+            ])
+        case let .pane(pane):
+            text.stringValue = pane.title
+            let icon = NSImageView(image: Self.icon(symbol: pane.symbol, color: pane.color))
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(icon)
+            cell.imageView = icon
+            NSLayoutConstraint.activate([
+                icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                icon.widthAnchor.constraint(equalToConstant: 22),
+                icon.heightAnchor.constraint(equalToConstant: 22),
+                text.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+                text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                text.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+            ])
+        }
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !selecting, entries.indices.contains(table.selectedRow),
+              case let .pane(pane) = entries[table.selectedRow] else { return }
+        onSelect?(pane)
+    }
+
+    /// A white symbol on a coloured rounded square.
+    private static func icon(symbol: String, color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 22, height: 22), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5).fill()
+            let configuration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+            if let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(configuration) {
+                let size = glyph.size
+                glyph.draw(in: NSRect(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2,
+                                      width: size.width, height: size.height))
+            }
+            return true
+        }
     }
 }

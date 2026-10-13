@@ -87,7 +87,10 @@ working and hide nothing.
 ## Using it
 
 - **Click the chevron** to show your hidden icons, click again to put them away.
-- **Right-click it** for Settings and Quit.
+- **Right-click it** (or ⌥-click) for a menu of your **hidden icons**: pick one and
+  its own menu or panel opens where it would have been, with nothing else revealed —
+  handy on a notched Mac with no room to show everything. Settings and Quit are there
+  too. Needs Accessibility, to read and press the icons.
 - Set a **keyboard shortcut** in Settings if you'd rather not aim at the menu bar.
 - Icons hide themselves again after a delay you choose, and never while your pointer
   is up in the menu bar.
@@ -108,14 +111,30 @@ with a single icon needs no name. This one needs Accessibility.
 JustHide never moves anything. Where each icon sits is macOS's business (see below),
 so ⌘-drag them into the order you want and macOS will remember it.
 
-**Hide new menu bar apps automatically** (Behaviour, off by default) hides an app the
+**Hide new menu bar apps automatically** (Menu Bar Apps, off by default) hides an app the
 first time it puts an icon in the bar and adds it to the list, where unticking
 **Hidden** keeps it visible for good. Apps already in your bar, or already in the list,
 never count as new; Apple's own never do. Needs Accessibility, to see the icon.
 
+### Keeping the camera button and Live Activities
+
+The usual way of hiding makes macOS hide some of its own icons too: the green camera
+button (with Video Effects in it), Focus and Now Playing, and it stops the clock
+opening Notification Center. **Keep the camera button and Live Activities**
+(Behaviour, off by default) hides apps the other way macOS offers — by switching them
+off under **Allow in Menu Bar** in System Settings — so all of those stay.
+
+It asks you, once, to pick one file (Control Center's preferences) in an open panel;
+that pick is what lets JustHide change the switches. The costs: while icons are hidden
+those apps show as switched off in System Settings, and icons slide out and back
+rather than vanishing. JustHide switches them back on when you show icons or quit, and
+at its next launch after a crash. An app Control Center hasn't seen yet is hidden the
+usual way until it has.
+
 ### Now Playing, Focus and Time Machine
 
-All three are off until you switch them on, in the right-hand column of Settings.
+All three are off until you switch them on, each on its own page under **Extra Icons**
+in Settings.
 Now Playing and Focus stay in the bar while your other icons are hidden — which
 Apple's own do not — and Time Machine can finally hide with them.
 
@@ -166,7 +185,8 @@ macOS 27 works rather than choices:
   order you opened things in. ⌘-drag is the only thing that changes it, yours or
   anyone's: no app can move another app's icon on macOS 27.
 - **While icons are hidden, clicking the clock won't open Notification Center** —
-  unless you turn on **Clock opens Notification Center**, which stands the
+  unless you hide with **Keep the camera button and Live Activities**, which leaves
+  the clock alone, or turn on **Clock opens Notification Center**, which stands the
   concealment down for as long as the panel is open and puts it back when you close
   it. That costs a brief flash of your hidden icons, and needs Accessibility. Left
   off, swipe in from the right edge or reveal first. Wi-Fi and Control Centre are
@@ -308,7 +328,9 @@ Things measured here that cost real time, in case they save someone else's:
 Sources/
   AssertionController.swift   the app: chevron, conceal/reveal, auto-hide
   AssessmentMode.swift        the macOS 27 concealment assertion
-  PreferencesWindow.swift     settings, built in code
+  MenuBarSwitches.swift       hiding through System Settings' Allow in Menu Bar
+  HiddenIconsMenu.swift       the hidden icons in the chevron's menu
+  PreferencesWindow.swift     settings, built in code: sidebar and pages
   AppPicker.swift             the "add an app" sheet (a table, because menus can't
                               draw icons on 27)
   AccessibilityAccess.swift   asking for, and re-checking, the one permission

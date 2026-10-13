@@ -51,8 +51,12 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     private var allowlistTimer: Timer?
     private var runningAppsObserver: NSKeyValueObservation?
     private var knownPIDs: Set<pid_t> = []
+    /// Hidden through System Settings' switches (see MenuBarSwitches) rather
+    /// than, or as well as, an assertion.
+    private var switchedOff = false
+    private var signalSources: [DispatchSourceSignal] = []
 
-    private var isConcealed: Bool { token != nil || suspendedForClock }
+    private var isConcealed: Bool { token != nil || suspendedForClock || switchedOff }
 
     private var hiddenBundleIDs: Set<String> { Settings.hiddenBundleIDs }
 
@@ -142,6 +146,13 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
+        // Anything JustHide switched off and never switched back on -- a crash,
+        // or the option turned off while it was not running -- goes back on.
+        // With the option on, the first conceal below sorts it out instead,
+        // without showing the apps in between.
+        if !Settings.hidesWithMenuBarSwitches { MenuBarSwitches.restoreAll() }
+        quitCleanlyOnSignals()
+
         // Let the bar settle before the first conceal, so every owner has
         // registered its items.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
@@ -154,10 +165,32 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Quitting must not leave apps switched off in System Settings: nothing
+    /// else would ever switch them back on. (An assertion dies with us.)
+    func applicationWillTerminate(_ note: Notification) {
+        MenuBarSwitches.restoreAll()
+    }
+
+    /// `kill`, `killall` and installers send SIGTERM, which ends the process
+    /// without AppKit's quit -- measured: the switches stayed off. Routed
+    /// through a normal terminate so the above runs.
+    private func quitCleanlyOnSignals() {
+        for number in [SIGTERM, SIGINT, SIGHUP] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { NSApp.terminate(nil) }
+            source.resume()
+            signalSources.append(source)
+        }
+    }
+
     // MARK: - Conceal / reveal
 
     @objc private func chevronClicked() {
-        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
+        // Right-click, or Option-click for a one-handed trackpad: the menu,
+        // with the hidden icons at the top of it.
+        if let event = NSApp.currentEvent,
+           event.type == .rightMouseUp || event.modifierFlags.contains(.option) {
             showMenu()
             return
         }
@@ -186,7 +219,38 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         // before the assertion for the same reason.
         TimeMachineItem.shared.setConcealed(true)
 
-        AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: hidden)) { [weak self] result in
+        // The switches first, when asked for. Whatever they cannot take -- an
+        // app Control Centre has not seen yet -- still needs the assertion, but
+        // only if it is running: one that is not has no icon to hide, and is
+        // looked at again when it launches.
+        var forAssertion = hidden
+        if Settings.hidesWithMenuBarSwitches {
+            if let handled = MenuBarSwitches.apply(hiding: hidden) {
+                switchedOff = true
+                let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+                forAssertion = hidden.subtracting(handled).filter { id in
+                    running.contains(id) || running.contains { id.hasPrefix($0 + ".") }
+                }
+            } else {
+                Log.controller.error("menu bar switches unavailable (\(MenuBarSwitches.problem ?? "?")); using the assertion")
+            }
+        } else if switchedOff {
+            // The option was just turned off: hand over to the assertion below,
+            // and switch the apps back on once it holds.
+            switchedOff = false
+        }
+        guard !forAssertion.isEmpty else {
+            token?.invalidate()
+            token = nil
+            endClockSuspension()
+            JustHide.applyGlyph(to: chevron, concealed: true)
+            autoHideTimer?.invalidate()
+            Mechanism.report(failure: nil)
+            Log.controller.log("switched off \(hidden.count) app(s); no assertion needed")
+            return
+        }
+
+        AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: forAssertion)) { [weak self] result in
             guard let self = self else { return }
             switch result {
             case let .success(token):
@@ -199,11 +263,12 @@ final class AssertionController: NSObject, NSApplicationDelegate {
                 let previous = self.token
                 self.token = token
                 previous?.invalidate()
+                if !Settings.hidesWithMenuBarSwitches { MenuBarSwitches.restoreAll() }
                 self.endClockSuspension()
                 JustHide.applyGlyph(to: self.chevron, concealed: true)
                 self.autoHideTimer?.invalidate()
                 Mechanism.report(failure: nil)
-                Log.controller.log("concealed \(hidden.count) app(s)")
+                Log.controller.log("concealed \(forAssertion.count) app(s) with the assertion")
             case let .failure(error):
                 // The completion handler comes back from MenuBarAgent, so it is
                 // not promised to be the main queue, and everything below is UI.
@@ -223,6 +288,10 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         endClockSuspension()
         token?.invalidate()
         token = nil
+        if switchedOff {
+            switchedOff = false
+            MenuBarSwitches.restoreAll()
+        }
         Mechanism.report(failure: nil)
         JustHide.applyGlyph(to: chevron, concealed: false)
         TimeMachineItem.shared.setConcealed(false)
@@ -267,17 +336,22 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         }
         guard isConcealed else { return }
         for app in newcomers {
-            guard let bundleID = app.bundleIdentifier,
-                  !hiddenBundleIDs.contains(bundleID) else { continue }
-            checkForItems(from: app, named: bundleID, attempt: 0)
+            guard let bundleID = app.bundleIdentifier else { continue }
+            // Two kinds of newcomer need a look. Under the assertion, one that is
+            // NOT hidden, since the allowlist predates it. With the switches, one
+            // that IS hidden, in case Control Centre has never seen it and so has
+            // no switch to turn off until it puts an icon up.
+            let hidden = hiddenBundleIDs.contains(bundleID)
+            if hidden ? switchedOff : token != nil {
+                checkForItems(from: app, named: bundleID, attempt: 0)
+            }
         }
     }
 
     private func checkForItems(from app: NSRunningApplication, named bundleID: String, attempt: Int) {
         guard attempt < Self.itemChecks.count else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemChecks[attempt]) { [weak self] in
-            guard let self = self, self.isConcealed, !app.isTerminated,
-                  !self.hiddenBundleIDs.contains(bundleID) else { return }
+            guard let self = self, self.isConcealed, !app.isTerminated else { return }
             // Without Accessibility there is no way to tell whether this app owns
             // an icon, so refresh once regardless: a missing icon is worse than a
             // pointless refresh.
@@ -593,6 +667,12 @@ final class AssertionController: NSObject, NSApplicationDelegate {
                                                         symbol: "arrow.down.circle")
             menu.addItem(update)
             menu.addItem(NSMenuItem.separator())
+        }
+
+        // Reachable without revealing anything: the reason this menu exists on a
+        // notched Mac, where there is often no room to show them all.
+        for item in HiddenIconsMenu.items(target: self, settingsAction: #selector(openSettings)) {
+            menu.addItem(item)
         }
 
         if Mechanism.failure != nil {

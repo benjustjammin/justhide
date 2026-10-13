@@ -269,6 +269,30 @@ extension Settings {
             NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
         }
     }
+
+    /// Hide through System Settings' Allow in Menu Bar switches instead of the
+    /// assertion, so macOS keeps its own icons (see MenuBarSwitches). Off by
+    /// default: it needs a file picked once, and it changes the user's switches.
+    static var hidesWithMenuBarSwitches: Bool {
+        get { UserDefaults.standard.bool(forKey: "hidesWithMenuBarSwitches") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "hidesWithMenuBarSwitches")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// The picked Control Centre preferences file, as a security-scoped bookmark.
+    static var menuBarSwitchesBookmark: Data? {
+        get { UserDefaults.standard.data(forKey: "menuBarSwitchesBookmark") }
+        set { UserDefaults.standard.set(newValue, forKey: "menuBarSwitchesBookmark") }
+    }
+
+    /// The apps JustHide has switched off, and so must switch back on. Kept on
+    /// disk so a crash is put right at the next launch.
+    static var switchedOffInMenuBar: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: "switchedOffInMenuBar") ?? []) }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: "switchedOffInMenuBar") }
+    }
 }
 
 /// Just enough of a key-code table to render a shortcut. Only the keys someone
