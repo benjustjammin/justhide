@@ -415,8 +415,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         // The cost sits under the switch rather than only in "Good to know":
         // it is specific to this choice, so it belongs where the choice is made.
         let clockNote = label("macOS blocks Notification Center while icons are hidden. Clicking "
-                              + "the clock unhides for a moment so it opens; closing it hides "
-                              + "again. Your icons are back while Notification Center is open.",
+                              + "the clock unhides for a moment so it opens, then hides again. "
+                              + "Needs Accessibility.",
                               secondary: true)
         clockNote.maximumNumberOfLines = 0
         self.clockNote = clockNote
@@ -889,9 +889,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         if switches {
             // Nothing to say about the clock: no assertion, nothing blocked.
         } else if Settings.clockClickThrough {
-            notes.append("• Clicking the clock unhides briefly so Notification Center opens, "
-                         + "and hides again when you close it \u{2014} macOS will not open it "
-                         + "while icons are hidden.")
+            notes.append("• Clicking the clock unhides for a moment so Notification Center "
+                         + "opens \u{2014} macOS will not open it while icons are hidden.")
         } else {
             notes.append("• While icons are hidden, clicking the clock will not open "
                          + "Notification Center. Swipe in from the right edge, or turn on the "

@@ -187,8 +187,8 @@ macOS 27 works rather than choices:
 - **While icons are hidden, clicking the clock won't open Notification Center** —
   unless you hide with **Keep the camera button and Live Activities**, which leaves
   the clock alone, or turn on **Clock opens Notification Center**, which stands the
-  concealment down for as long as the panel is open and puts it back when you close
-  it. That costs a brief flash of your hidden icons, and needs Accessibility. Left
+  concealment down just long enough for the panel to open, then puts it back. That
+  costs a brief flash of your hidden icons, and needs Accessibility. Left
   off, swipe in from the right edge or reveal first. Wi-Fi and Control Centre are
   unaffected either way.
 - **JustHide's Focus menu is its own, not Apple's.** Apple's dropdown only opens from

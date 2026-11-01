@@ -60,42 +60,6 @@ enum AccessibilityAccess {
         NSWorkspace.shared.open(url)
     }
 
-    /// Presses the clock, to replay a click that the concealment assertion
-    /// swallowed. See AssertionController.clockClicked for why this is needed
-    /// and what was measured.
-    ///
-    /// The element is found here, on each call, rather than cached: one looked
-    /// up while a restriction was active does not respond to a press afterwards.
-    @discardableResult
-    static func pressClock() -> Bool {
-        guard isGranted else { return false }
-        guard let agent = NSWorkspace.shared.runningApplications.first(where: {
-            $0.bundleIdentifier == "com.apple.MenuBarAgent"
-        }) else { return false }
-        func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
-            var value: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success
-            else { return nil }
-            return value
-        }
-        guard let extras = attribute(AXUIElementCreateApplication(agent.processIdentifier),
-                                     "AXExtrasMenuBar"),
-              CFGetTypeID(extras) == AXUIElementGetTypeID(),
-              let groups = attribute(extras as! AXUIElement,
-                                     kAXChildrenAttribute) as? [AXUIElement]
-        else { return false }
-        // The clock is a child of a hosting group, not a top-level item.
-        for group in groups {
-            let children = (attribute(group, kAXChildrenAttribute) as? [AXUIElement]) ?? []
-            for child in children
-            where attribute(child, "AXIdentifier") as? String == AXMenuBar.clockIdentifier {
-                AXUIElementPerformAction(child, kAXPressAction as CFString)
-                return true
-            }
-        }
-        return false
-    }
-
     /// Starts JustHide again and quits this copy.
     ///
     /// A process is told its Accessibility state when it starts, and a grant made
