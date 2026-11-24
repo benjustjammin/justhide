@@ -26,6 +26,10 @@ if [ -n "${JUSTHIDE_IDENTITY:-}" ]; then
     IDENTITY="$JUSTHIDE_IDENTITY"
 elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application"; then
     IDENTITY="Developer ID Application"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
+    # Just as stable for TCC (the grant keys on the team and bundle ID), and it
+    # is the certificate Xcode hands out for free, so it is often the only one.
+    IDENTITY="Apple Development"
 else
     IDENTITY="JustHide Dev"
 fi

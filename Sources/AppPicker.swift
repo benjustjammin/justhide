@@ -46,6 +46,9 @@ final class AppPicker: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         shown = all
 
         let panel = build(accessibilityGranted: candidates.accessibilityGranted)
+        // A window's appearance passes to its views, not to its sheets, so a
+        // Settings window set to Dark would otherwise drop a light sheet.
+        panel.appearance = window.appearance
         self.panel = panel
         table?.reloadData()
         updateAddButton()

@@ -101,6 +101,60 @@ enum Settings {
         }
     }
 
+    // MARK: - macOS's own icons
+
+    /// macOS's own icons, which the assertion can hide one by one: it takes a
+    /// list of the system items still allowed alongside the apps, and leaving
+    /// one off conceals it. Numbered as MenuBarAgent numbers them on macOS 27
+    /// (the numbering Dimble uses, github.com/fif7y/dimble, MenuBarPolicy.swift).
+    ///
+    /// Two are not offered. The clock (2) is what the clock option stands the
+    /// concealment down for, and a bar without it is no use to anyone; Control
+    /// Center (8) is the way back to everything else.
+    enum SystemIcon: Int, CaseIterable {
+        // Declared in the order the list shows them, not by number.
+        case wifi = 6
+        case bluetooth = 1
+        case battery = 0
+        case volume = 5
+        case keyboard = 4
+        case displays = 3
+        case screenMirroring = 7
+
+        var label: String {
+            switch self {
+            case .wifi: return "Wi\u{2011}Fi"
+            case .bluetooth: return "Bluetooth"
+            case .battery: return "Battery"
+            case .volume: return "Sound"
+            case .keyboard: return "Input menu"
+            case .displays: return "Display"
+            case .screenMirroring: return "Screen Mirroring"
+            }
+        }
+
+        /// The clock and Control Center, always allowed.
+        static let alwaysShown: [Int] = [2, 8]
+    }
+
+    /// macOS's own icons that hide along with the hidden apps. None by
+    /// default: the default has always been that nothing hides unasked.
+    static var hiddenSystemIcons: Set<SystemIcon> {
+        get {
+            let stored = defaults.array(forKey: "hiddenSystemIcons") as? [Int] ?? []
+            return Set(stored.compactMap(SystemIcon.init(rawValue:)))
+        }
+        set {
+            defaults.set(newValue.map(\.rawValue).sorted(), forKey: "hiddenSystemIcons")
+            NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
+        }
+    }
+
+    /// Whether there is anything at all to hide: an app, or one of macOS's own.
+    static var hidesAnything: Bool {
+        !hiddenBundleIDs.isEmpty || !hiddenSystemIcons.isEmpty
+    }
+
     // MARK: - New apps
 
     /// Hide an app the first time it puts an icon in the bar (GitHub issue #2).
@@ -312,6 +366,35 @@ enum Settings {
             defaults.set(newValue.rawValue, forKey: Key.glyph)
             NotificationCenter.default.post(name: .justHideSettingsChanged, object: nil)
         }
+    }
+
+    /// Light or dark for JustHide's own windows. Follows macOS unless the user
+    /// picks one. Only the windows: the menu bar and its menus belong to macOS,
+    /// and a light menu hanging off a dark bar would look broken, not chosen.
+    enum WindowAppearance: String, CaseIterable {
+        case system, light, dark
+
+        var label: String {
+            switch self {
+            case .system: return "System"
+            case .light: return "Light"
+            case .dark: return "Dark"
+            }
+        }
+
+        /// nil means "inherit", which is what follows the system live.
+        var appearance: NSAppearance? {
+            switch self {
+            case .system: return nil
+            case .light: return NSAppearance(named: .aqua)
+            case .dark: return NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+
+    static var windowAppearance: WindowAppearance {
+        get { defaults.string(forKey: "windowAppearance").flatMap(WindowAppearance.init) ?? .system }
+        set { defaults.set(newValue.rawValue, forKey: "windowAppearance") }
     }
 
     // MARK: - Behaviour
