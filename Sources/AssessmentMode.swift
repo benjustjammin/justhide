@@ -37,9 +37,13 @@ enum AssessmentMode {
         NSSelectorFromString("activateWithConfiguration:completionHandler:")
     private static let invalidateSelector = NSSelectorFromString("invalidate")
 
-    /// MenuBarAgent numbers its own system items 0 through 8 on macOS 27.0.
-    /// Keeping all of them means the clock, Wi-Fi and battery stay put.
-    private static let systemItems = (0...8).map { NSNumber(value: $0) } as NSArray
+    /// MenuBarAgent numbers its own system items 0 through 8 on macOS 27.0, and
+    /// conceals any the configuration leaves out. All of them are allowed except
+    /// the ones the user chose to hide (see Settings.SystemIcon).
+    private static func systemItems(hiding hidden: Set<Settings.SystemIcon>) -> NSArray {
+        let concealed = Set(hidden.map(\.rawValue))
+        return (0...8).filter { !concealed.contains($0) }.map { NSNumber(value: $0) } as NSArray
+    }
 
     private static let classes: (configuration: AnyClass, assertion: AnyClass)? = {
         guard dlopen(frameworkPath, RTLD_NOW) != nil,
@@ -95,6 +99,7 @@ enum AssessmentMode {
     /// respects Developer ID-signed apps. It also means a debug build run from a
     /// build directory cannot keep its own icon; install it first.
     static func conceal(allowing allowed: Set<String>,
+                        hidingSystemIcons hiddenSystem: Set<Settings.SystemIcon> = [],
                         completion: @escaping (Result<Token, Error>) -> Void) {
         guard isAvailable, let classes = classes else {
             completion(.failure(Failure.unavailable))
@@ -107,7 +112,7 @@ enum AssessmentMode {
         let allowed = allowed.sorted()
 
         guard let configuration = (classes.configuration.alloc() as AnyObject)
-                .perform(configureSelector, with: systemItems, with: allowed as NSArray)?
+                .perform(configureSelector, with: systemItems(hiding: hiddenSystem), with: allowed as NSArray)?
                 .takeUnretainedValue(),
               let assertion = (classes.assertion.alloc() as AnyObject)
                 .perform(NSSelectorFromString("init"))?
@@ -117,7 +122,7 @@ enum AssessmentMode {
             return
         }
 
-        Log.sections.log("activating assertion: allowing \(allowed.count) apps")
+        Log.sections.log("activating assertion: allowing \(allowed.count) apps, hiding \(hiddenSystem.count) system icon(s)")
 
         var settled = false
         let handler: @convention(block) (Any?) -> Void = { error in

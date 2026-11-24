@@ -19,6 +19,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var loginTitle: NSTextField?
     private var hoverCheckbox: NSSwitch?
     private var newAppsCheckbox: NSSwitch?
+    private var systemIconSwitches: [Settings.SystemIcon: NSSwitch] = [:]
+    private var systemIconsNote: NSTextField?
     private var clockCheckbox: NSSwitch?
     private var clockNote: NSTextField?
     private var switchesCheckbox: NSSwitch?
@@ -39,7 +41,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     private var autoHidePopUp: NSPopUpButton?
     private var shortcutButton: NSButton?
     private var shortcutClear: NSButton?
-    private var quirksNote: NSTextField?
+    private var quirksHolder: NSStackView?
+    private var shownQuirks: [String] = []
+    private var appearanceControl: NSSegmentedControl?
+    private var removeButton: NSButton?
+    private var emptyListNote: NSTextField?
     private var accessRow: NSStackView?
     private var accessNote: NSTextField?
     private var accessButton: NSButton?
@@ -283,8 +289,10 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         // ---- Hidden apps
         let table = NSTableView()
-        table.rowHeight = 24
+        table.rowHeight = 28
         table.style = .inset
+        table.intercellSpacing = NSSize(width: 6, height: 0)
+        table.usesAlternatingRowBackgroundColors = false
         let appColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("app"))
         appColumn.title = "App"
         appColumn.resizingMask = .autoresizingMask
@@ -324,21 +332,52 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let listButtons = NSSegmentedControl(labels: ["+", "\u{2212}", "\u{21BB}"],
-                                             trackingMode: .momentary,
-                                             target: self, action: #selector(addOrRemove(_:)))
-        listButtons.segmentStyle = .smallSquare
-        listButtons.translatesAutoresizingMaskIntoConstraints = false
+        // Empty is a real state on a first run, and a blank box with column
+        // headers over nothing reads as broken rather than as "add some".
+        let emptyListNote = label("No apps yet. Click + to add one.", secondary: true)
+        emptyListNote.font = .systemFont(ofSize: NSFont.systemFontSize)
+        emptyListNote.textColor = .tertiaryLabelColor
+        emptyListNote.isHidden = true
+        self.emptyListNote = emptyListNote
+        // Over the list rather than in it: a scroll view lays out its own
+        // subviews and pays no attention to constraints on them.
+        let listArea = NSView()
+        listArea.translatesAutoresizingMaskIntoConstraints = false
+        listArea.addSubview(scroll)
+        listArea.addSubview(emptyListNote)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: listArea.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: listArea.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: listArea.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: listArea.trailingAnchor),
+            emptyListNote.centerXAnchor.constraint(equalTo: listArea.centerXAnchor),
+            // Below the column headers, in the middle of where rows would be.
+            emptyListNote.centerYAnchor.constraint(equalTo: listArea.centerYAnchor, constant: 14),
+        ])
+
+        // Add and remove sit along the bottom edge of the list, inside its box,
+        // as they do in System Settings, rather than as a separate strip below.
+        let addButton = barButton("plus", "Add an app\u{2026}", #selector(addApp))
+        let removeButton = barButton("minus", "Remove the selected app from the list",
+                                     #selector(removeApp))
+        removeButton.isEnabled = false
+        self.removeButton = removeButton
+        let recheckButton = barButton("arrow.clockwise", "Look at the menu bar again",
+                                      #selector(recheck))
+        let barDivider = NSBox()
+        barDivider.boxType = .separator
+        barDivider.translatesAutoresizingMaskIntoConstraints = false
+        barDivider.heightAnchor.constraint(equalToConstant: 14).isActive = true
+        let listBar = NSStackView(views: [addButton, barDivider, removeButton, NSView(), recheckButton])
+        listBar.orientation = .horizontal
+        listBar.spacing = 2
+        listBar.edgeInsets = NSEdgeInsets(top: 3, left: 6, bottom: 3, right: 6)
+        listBar.translatesAutoresizingMaskIntoConstraints = false
 
         let perAppNote = label(Self.perAppNoteText, secondary: true)
         perAppNote.maximumNumberOfLines = 0
-        perAppNote.preferredMaxLayoutWidth = Self.groupWidth - 110
+        perAppNote.preferredMaxLayoutWidth = Self.groupWidth
         self.perAppNote = perAppNote
-        let listFooter = NSStackView(views: [listButtons, perAppNote])
-        listFooter.orientation = .horizontal
-        listFooter.alignment = .top
-        listFooter.spacing = 12
-        listFooter.translatesAutoresizingMaskIntoConstraints = false
 
         let newAppsCheckbox = makeSwitch(#selector(toggleNewApps))
         self.newAppsCheckbox = newAppsCheckbox
@@ -347,6 +386,19 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                                 + "Hidden keeps it visible for good. Needs Accessibility, to see "
                                 + "the icon.", secondary: true)
         newAppsNote.maximumNumberOfLines = 0
+
+        // ---- macOS's own icons, which hide one by one, unlike apps' icons.
+        var systemIconRows: [NSView] = []
+        for icon in Settings.SystemIcon.allCases {
+            let toggle = makeSwitch(#selector(toggleSystemIcon(_:)))
+            toggle.tag = icon.rawValue
+            systemIconSwitches[icon] = toggle
+            systemIconRows.append(row("Hide \(icon.label)", control: toggle))
+        }
+        let systemIconsNote = label("", secondary: true)
+        systemIconsNote.maximumNumberOfLines = 0
+        systemIconsNote.preferredMaxLayoutWidth = Self.groupWidth
+        self.systemIconsNote = systemIconsNote
 
         // ---- Accessibility. Hidden unless something the user has actually
         // switched on needs the permission, so it is never a standing nag:
@@ -568,19 +620,29 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
         // ---- Good to know: reference material, so it lives on About rather
         // than in the way of the settings.
-        let quirks = label(Self.quirksText, secondary: true)
-        quirks.maximumNumberOfLines = 0
-        quirks.preferredMaxLayoutWidth = Self.rowWidth
-        quirksNote = quirks
+        let quirksHolder = NSStackView()
+        quirksHolder.orientation = .vertical
+        quirksHolder.translatesAutoresizingMaskIntoConstraints = false
+        self.quirksHolder = quirksHolder
+
+        // ---- Appearance of this window, and only this window.
+        let appearanceControl = NSSegmentedControl(
+            labels: Settings.WindowAppearance.allCases.map(\.label),
+            trackingMode: .selectOne, target: self, action: #selector(changeAppearance))
+        appearanceControl.translatesAutoresizingMaskIntoConstraints = false
+        self.appearanceControl = appearanceControl
 
         // ---- The pages
         pages[.apps] = page([
             accessRow,
             header("Apps with menu bar icons"),
-            group([scroll], padded: false),
-            listFooter,
+            group([listArea, listBar], padded: false),
+            perAppNote,
             group([row("Hide new menu bar apps automatically", note: newAppsNote,
                        control: newAppsCheckbox)]),
+            header("macOS\u{2019}s own icons"),
+            group(systemIconRows),
+            systemIconsNote,
         ])
         pages[.behaviour] = page([
             mechanismRow,
@@ -625,6 +687,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                     controlWidth: 172),
                 row("Menu bar symbol", control: glyphPopUp),
             ]),
+            group([
+                row("Appearance", note: label("System follows macOS as it switches between light "
+                                              + "and dark.", secondary: true),
+                    control: appearanceControl),
+            ]),
         ])
         pages[.about] = page([
             aboutHeader,
@@ -632,7 +699,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                        note: label("Once a day, and nothing about you is sent.", secondary: true),
                        control: updatesCheckbox)]),
             header("Good to know"),
-            group([padded(quirks)]),
+            quirksHolder,
         ])
 
         // ---- Sidebar and the page beside it
@@ -673,6 +740,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         window.contentMaxSize = NSSize(width: Self.sidebarWidth + Self.paneWidth, height: 4000)
 
         self.window = window
+        applyAppearance()
         select(currentPane)
     }
 
@@ -746,8 +814,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     /// The small heading over a group.
     private func header(_ text: String) -> NSTextField {
-        let field = label(text, bold: true)
-        field.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let field = label(text)
+        field.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        field.setAccessibilityRole(.staticText)
         return field
     }
 
@@ -766,9 +835,12 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
                 line.boxType = .separator
                 line.translatesAutoresizingMaskIntoConstraints = false
                 stack.addArrangedSubview(line)
-                line.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+                // Between settings the hairline starts under the text; between a
+                // list and its buttons it runs edge to edge, as one box split in two.
+                let indent: CGFloat = padded ? 12 : 0
+                line.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * indent).isActive = true
                 stack.setCustomSpacing(0, after: line)
-                line.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 12).isActive = true
+                line.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: indent).isActive = true
             }
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -818,11 +890,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         if let control = control {
             control.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(control)
-            let wanted: CGFloat = controlWidth
-                ?? (control is NSPopUpButton ? 210 : control.fittingSize.width)
-            if control is NSPopUpButton {
-                constraints.append(control.widthAnchor.constraint(equalToConstant: wanted))
-            }
+            // Pop-ups at their natural width, as System Settings has them: a
+            // short choice in a long grey bar looks like a text field.
+            let wanted: CGFloat = controlWidth ?? control.fittingSize.width
             constraints += [
                 control.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
                 control.centerYAnchor.constraint(equalTo: row.centerYAnchor),
@@ -858,29 +928,65 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         return row
     }
 
+    /// One of the small borderless buttons along the bottom of a list.
+    private func barButton(_ symbol: String, _ help: String, _ action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
+        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.bezelStyle = .accessoryBarAction
+        button.isBordered = false
+        button.showsBorderOnlyWhileMouseInside = true
+        button.toolTip = help
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 24),
+            button.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        return button
+    }
+
+    /// The notes on About, one row each. Rebuilt only when what they say
+    /// changes, which is when a setting they mention does.
+    private func applyQuirks() {
+        let quirks = Self.quirks
+        guard let holder = quirksHolder, quirks != shownQuirks else { return }
+        shownQuirks = quirks
+        holder.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let rows: [NSView] = quirks.map { text in
+            let note = label(text, secondary: true)
+            note.font = .systemFont(ofSize: NSFont.smallSystemFontSize + 1)
+            note.maximumNumberOfLines = 0
+            note.preferredMaxLayoutWidth = Self.rowWidth
+            return padded(note)
+        }
+        let box = group(rows)
+        holder.addArrangedSubview(box)
+        box.widthAnchor.constraint(equalTo: holder.widthAnchor).isActive = true
+    }
+
     /// Written for someone who did not implement it: what is surprising, and why.
-    private static var quirksText: String {
+    private static var quirks: [String] {
         // Kept tight on purpose: this sits in a column, and a wall of text is
         // one nobody reads.
         let switches = Settings.hidesWithMenuBarSwitches
         var notes = [
-            "• Hiding works per app, not per icon \u{2014} an app with several icons hides "
+            "Hiding works per app, not per icon \u{2014} an app with several icons hides "
             + "all of them together.",
-            "• Position means nothing here: a hidden icon is not moved aside, it is not "
+            "Position means nothing here: a hidden icon is not moved aside, it is not "
             + "drawn at all. macOS places each icon and remembers it per app, so one can "
             + "sit either side of the JustHide symbol. \u{2318}-drag to rearrange.",
-            "• Right-click the JustHide symbol, or \u{2325}-click it, to open any hidden icon "
+            "Right-click the JustHide symbol, or \u{2325}-click it, to open any hidden icon "
             + "from its menu without showing the rest.",
-            "• A shortcut opens an icon\u{2019}s own menu in place without unhiding it; press "
+            "A shortcut opens an icon\u{2019}s own menu in place without unhiding it; press "
             + "again to close. Needs Accessibility, and the app must be running.",
         ]
         if switches {
-            notes.append("• Hidden apps are switched off under Menu Bar in System Settings while "
+            notes.append("Hidden apps are switched off under Menu Bar in System Settings while "
                          + "they are hidden, and back on when shown or when JustHide quits. If an "
                          + "app Control Center has not seen yet is hidden, JustHide hides it the "
                          + "usual way, and macOS\u{2019}s own icons go with it until it has.")
         } else {
-            notes.append("• While anything is hidden, macOS also hides its own Now Playing and Focus "
+            notes.append("While anything is hidden, macOS also hides its own Now Playing and Focus "
                          + "icons. JustHide\u{2019}s own versions stay; to avoid seeing two of each while "
                          + "icons are revealed, set Apple\u{2019}s to \u{201C}Don\u{2019}t Show\u{201D} under "
                          + "Menu Bar in System Settings. JustHide\u{2019}s Focus switches modes through its "
@@ -889,18 +995,18 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         if switches {
             // Nothing to say about the clock: no assertion, nothing blocked.
         } else if Settings.clockClickThrough {
-            notes.append("• Clicking the clock unhides for a moment so Notification Center "
+            notes.append("Clicking the clock unhides for a moment so Notification Center "
                          + "opens \u{2014} macOS will not open it while icons are hidden.")
         } else {
-            notes.append("• While icons are hidden, clicking the clock will not open "
+            notes.append("While icons are hidden, clicking the clock will not open "
                          + "Notification Center. Swipe in from the right edge, or turn on the "
                          + "clock option in Behaviour.")
         }
         if Mechanism.current == .concealment {
-            notes.append("• Hiding uses an undocumented part of macOS 27. If an update takes it "
+            notes.append("Hiding uses an undocumented part of macOS 27. If an update takes it "
                          + "away, JustHide says so on its symbol and offers its older method.")
         }
-        return notes.joined(separator: "\n")
+        return notes
     }
 
     private static let autoHideOptions: [(label: String, seconds: Double)] = [
@@ -965,7 +1071,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         lastItemSignature = itemSignature()
         table?.reloadData()
         // Rows plus the column headers.
-        let wanted = min(max(rows.count, 6), 14) * 24 + 8 + 28
+        let wanted = min(max(rows.count, 6), 14) * 28 + 8 + 28
         if listHeight?.constant != CGFloat(wanted) {
             listHeight?.constant = CGFloat(wanted)
             fitWindow()
@@ -985,6 +1091,7 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         timeMachineWhenPopUp?.isEnabled = Settings.showsTimeMachine
         timeMachineWhenPopUp?.selectItem(at: Settings.timeMachineAppearance == .withHidden ? 0 : 1)
         newAppsCheckbox?.state = Settings.hidesNewApps ? .on : .off
+        applySystemIconsState()
         applyFocusState()
         if let index = Self.autoHideOptions.firstIndex(where: { $0.seconds == Settings.autoHideDelay }) {
             autoHidePopUp?.selectItem(at: index)
@@ -1012,7 +1119,9 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         applySwitchesState()
 
         // The notes depend on the chosen symbol, so they are rebuilt here.
-        quirksNote?.stringValue = Self.quirksText
+        applyQuirks()
+        emptyListNote?.isHidden = !rows.isEmpty
+        removeButton?.isEnabled = table.map { !$0.selectedRowIndexes.isEmpty } ?? false
         applyAccessibilityState()
         applyMechanismState()
         applyUpdateState()
@@ -1149,11 +1258,11 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
     }
 
     @objc private func allowAccessibility() {
-        if AccessibilityAccess.hasBeenAsked {
-            AccessibilityAccess.openSystemSettings()
-        } else {
-            AccessibilityAccess.request()
-        }
+        // Ask every time, not only the first: asking is what puts JustHide in
+        // the list, and after a new signature or a reset it is not there, so
+        // opening System Settings alone leaves nothing to switch on.
+        AccessibilityAccess.request()
+        if AccessibilityAccess.hasBeenAsked { AccessibilityAccess.openSystemSettings() }
         reload()
     }
 
@@ -1217,13 +1326,8 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
 
     // MARK: - Hidden apps
 
-    @objc private func addOrRemove(_ sender: NSSegmentedControl) {
-        switch sender.selectedSegment {
-        case 0: showAddPicker()
-        case 1: removeSelected()
-        default: recheck()
-        }
-    }
+    @objc private func addApp() { showAddPicker() }
+    @objc private func removeApp() { removeSelected() }
 
     /// A sheet, not a pop-up menu: macOS 27 does not draw NSMenuItem images, and
     /// this list is much easier to read with each app's icon beside its name.
@@ -1407,6 +1511,34 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
         Settings.timeMachineAppearance = when
     }
 
+    /// The switches, and the note under them, which says what hiding one of
+    /// these costs when the option to avoid that cost is on.
+    private func applySystemIconsState() {
+        let hidden = Settings.hiddenSystemIcons
+        let available = Mechanism.current == .concealment
+        for (icon, toggle) in systemIconSwitches {
+            toggle.state = hidden.contains(icon) ? .on : .off
+            toggle.isEnabled = available
+            toggle.toolTip = available ? nil : "Not available while JustHide is using its older method."
+        }
+        var text = "These hide one at a time, along with your hidden apps, and come back "
+            + "with them. The clock and Control Center always stay."
+        if Settings.hidesWithMenuBarSwitches, !hidden.isEmpty {
+            text += " Hiding any of these needs the usual way of hiding, so while they are "
+                + "hidden macOS hides its camera button, Focus and Now Playing too."
+        }
+        systemIconsNote?.stringValue = text
+        systemIconsNote?.textColor = available ? .secondaryLabelColor : .tertiaryLabelColor
+    }
+
+    @objc private func toggleSystemIcon(_ sender: NSSwitch) {
+        guard let icon = Settings.SystemIcon(rawValue: sender.tag) else { return }
+        var hidden = Settings.hiddenSystemIcons
+        if sender.state == .on { hidden.insert(icon) } else { hidden.remove(icon) }
+        Settings.hiddenSystemIcons = hidden
+        applySystemIconsState()
+    }
+
     @objc private func toggleNewApps() {
         Settings.hidesNewApps = newAppsCheckbox?.state == .on
         reload()
@@ -1447,6 +1579,21 @@ final class PreferencesWindow: NSObject, NSWindowDelegate {
               let glyph = Settings.Glyph(rawValue: raw) else { return }
         Settings.glyph = glyph
         reload()
+    }
+
+    @objc private func changeAppearance() {
+        guard let control = appearanceControl,
+              Settings.WindowAppearance.allCases.indices.contains(control.selectedSegment) else { return }
+        Settings.windowAppearance = Settings.WindowAppearance.allCases[control.selectedSegment]
+        applyAppearance()
+    }
+
+    /// nil when following the system, so the window changes the moment macOS
+    /// does, with nothing here listening for it.
+    private func applyAppearance() {
+        let choice = Settings.windowAppearance
+        window?.appearance = choice.appearance
+        appearanceControl?.selectedSegment = Settings.WindowAppearance.allCases.firstIndex(of: choice) ?? 0
     }
 
     @objc private func changeAutoHide() {
@@ -1593,6 +1740,10 @@ extension PreferencesWindow: NSTableViewDataSource, NSTableViewDelegate {
         rows.indices.contains(row) ? !rows[row].isChild : false
     }
 
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        removeButton?.isEnabled = !(table?.selectedRowIndexes.isEmpty ?? true)
+    }
+
     private func nameCell(for entry: ListRow, row: Int) -> NSView {
         let cell = NSTableCellView()
         let text = NSTextField(labelWithString: entry.name)
@@ -1623,8 +1774,8 @@ extension PreferencesWindow: NSTableViewDataSource, NSTableViewDelegate {
         cell.addSubview(icon)
         NSLayoutConstraint.activate([
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16),
+            icon.widthAnchor.constraint(equalToConstant: 18),
+            icon.heightAnchor.constraint(equalToConstant: 18),
             text.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
             text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             text.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
@@ -1810,6 +1961,7 @@ private final class GroupBox: NSView {
 
     override func updateLayer() {
         layer?.cornerRadius = 10
+        layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         layer?.backgroundColor = NSColor.quaternarySystemFill.cgColor
         layer?.borderColor = NSColor.separatorColor.cgColor

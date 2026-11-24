@@ -116,6 +116,14 @@ first time it puts an icon in the bar and adds it to the list, where unticking
 **Hidden** keeps it visible for good. Apps already in your bar, or already in the list,
 never count as new; Apple's own never do. Needs Accessibility, to see the icon.
 
+**macOS's own icons** (Menu Bar Apps) hide one at a time: Wi‑Fi, Bluetooth, Battery,
+Sound, the input menu, Display and Screen Mirroring each have a switch, and hide and
+come back with your hidden apps. The clock and Control Center always stay. These are
+left out of the assertion's list of allowed system items rather than switched off, so
+with **Keep the camera button and Live Activities** on, hiding one of them brings back
+the usual costs while it is hidden. The numbering of those items comes from
+[Dimble](https://github.com/fif7y/dimble) (GPLv3).
+
 ### Keeping the camera button and Live Activities
 
 The usual way of hiding makes macOS hide some of its own icons too: the green camera
@@ -177,7 +185,7 @@ Honest list of the things that will surprise you, all of them consequences of ho
 macOS 27 works rather than choices:
 
 - **Hiding is per app, not per icon.** An app with several icons hides all of them
-  together.
+  together. macOS's own icons are the exception: each hides on its own.
 - **Position means nothing here.** A hidden icon is not moved to one side, it simply
   isn't drawn, so the JustHide symbol is not a boundary with hidden things behind it.
   Which side of it an icon sits on is macOS's choice, remembered per app — and it is

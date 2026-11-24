@@ -108,6 +108,7 @@ if arguments.contains("--apps") {
     // has none. The app's own state is the one in Settings.
     print("Accessibility trusted: \(AXIsProcessTrusted()) (this process; a terminal's grant is inherited)")
     print("Hidden: \(Settings.hiddenBundleIDs.sorted().joined(separator: ", "))")
+    print("Hidden system icons: \(Settings.hiddenSystemIcons.map(\.label).sorted().joined(separator: ", "))")
     let candidates = MenuBarApps.candidates()
     for (title, group) in [("In your menu bar now", candidates.inBarNow),
                            ("Seen in your menu bar before", candidates.seenBefore)] {

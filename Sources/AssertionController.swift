@@ -208,7 +208,8 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     /// the chevron carrying the news until they look.
     private func conceal(userAsked: Bool = false) {
         let hidden = hiddenBundleIDs
-        guard !hidden.isEmpty else {
+        let hiddenSystem = Settings.hiddenSystemIcons
+        guard !hidden.isEmpty || !hiddenSystem.isEmpty else {
             Log.controller.log("nothing is marked hidden yet; right-click the chevron to choose")
             return
         }
@@ -243,7 +244,9 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             // and switch the apps back on once it holds.
             switchedOff = false
         }
-        guard !forAssertion.isEmpty else {
+        // macOS's own icons have no switch to turn off, so hiding any of them
+        // needs the assertion even when the switches took every app.
+        guard !forAssertion.isEmpty || !hiddenSystem.isEmpty else {
             token?.invalidate()
             token = nil
             endClockSuspension()
@@ -254,7 +257,8 @@ final class AssertionController: NSObject, NSApplicationDelegate {
             return
         }
 
-        AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: forAssertion)) { [weak self] result in
+        AssessmentMode.conceal(allowing: AssessmentMode.allowlist(excluding: forAssertion),
+                               hidingSystemIcons: hiddenSystem) { [weak self] result in
             guard let self = self else { return }
             switch result {
             case let .success(token):
@@ -272,7 +276,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
                 JustHide.applyGlyph(to: self.chevron, concealed: true)
                 self.autoHideTimer?.invalidate()
                 Mechanism.report(failure: nil)
-                Log.controller.log("concealed \(forAssertion.count) app(s) with the assertion")
+                Log.controller.log("concealed \(forAssertion.count) app(s) and \(hiddenSystem.count) system icon(s) with the assertion")
             case let .failure(error):
                 // The completion handler comes back from MenuBarAgent, so it is
                 // not promised to be the main queue, and everything below is UI.
@@ -307,7 +311,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
     /// hidden set changes while items are already concealed.
     private func reapplyIfConcealed() {
         guard isConcealed else { return }
-        if hiddenBundleIDs.isEmpty {
+        if !Settings.hidesAnything {
             reveal()
         } else {
             conceal()
@@ -452,7 +456,7 @@ final class AssertionController: NSObject, NSApplicationDelegate {
         refreshGlyph()
         applyShortcut()
         applyHoverMonitor()
-        if hiddenBundleIDs.isEmpty {
+        if !Settings.hidesAnything {
             if isConcealed { reveal() }
         } else {
             reapplyIfConcealed()
